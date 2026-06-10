@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and study session settings",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "avatar": { "type": "string" },
+        "joinDate": { "type": "string" },
+        "focusTime": { "type": "integer" },
+        "shortBreak": { "type": "integer" },
+        "longBreak": { "type": "integer" },
+        "activeSound": { "type": "string" },
+        "sessionsCompleted": { "type": "integer" }
+      },
+      "required": ["name", "email"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A productivity task in the planner",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "difficulty": { "type": "string", "enum": ["Baja", "Media", "Alta"] },
+        "sessions": { "type": "integer" },
+        "completed": { "type": "boolean" }
+      },
+      "required": ["userId", "title", "completed"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profile document containing their metrics and preferences."
+    },
+    "users/{userId}/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "The user's tasks."
+    }
+  }
+}

@@ -1,0 +1,66 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    // Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    
+    function incoming() {
+      return request.resource.data;
+    }
+    
+    function existing() {
+      return resource.data;
+    }
+    
+    // Entity validations
+    function isValidUser(data) {
+      return data.name is string && data.name.size() <= 200
+        && data.email is string && data.email.size() <= 200
+        && (data.avatar == null || (data.avatar is string && data.avatar.size() <= 1000000))
+        && (data.joinDate == null || (data.joinDate is string && data.joinDate.size() <= 50))
+        && (data.focusTime == null || data.focusTime is int)
+        && (data.shortBreak == null || data.shortBreak is int)
+        && (data.longBreak == null || data.longBreak is int)
+        && (data.activeSound == null || (data.activeSound is string && data.activeSound.size() <= 100))
+        && (data.sessionsCompleted == null || data.sessionsCompleted is int);
+    }
+    
+    function isValidTask(data, userId) {
+      return data.userId == request.auth.uid && data.userId == userId
+        && data.title is string && data.title.size() <= 500
+        && data.completed is bool
+        && (data.difficulty == null || (data.difficulty is string && data.difficulty.size() <= 50))
+        && (data.sessions == null || data.sessions is int)
+        && (data.date == null || (data.date is string && data.date.size() <= 50));
+    }
+    
+    // Rules
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidUser(incoming());
+      allow delete: if isOwner(userId);
+      
+      match /tasks/{taskId} {
+        allow get, delete: if isOwner(userId) && isValidId(taskId);
+        allow list: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidId(taskId) && isValidTask(incoming(), userId);
+      }
+    }
+  }
+}
