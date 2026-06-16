@@ -38,7 +38,12 @@ service cloud.firestore {
         && (data.shortBreak == null || data.shortBreak is int)
         && (data.longBreak == null || data.longBreak is int)
         && (data.activeSound == null || (data.activeSound is string && data.activeSound.size() <= 100))
-        && (data.sessionsCompleted == null || data.sessionsCompleted is int);
+        && (data.sessionsCompleted == null || data.sessionsCompleted is int)
+        && (data.currentStreak == null || data.currentStreak is int)
+        && (data.bestStreak == null || data.bestStreak is int)
+        && (data.lastActiveDate == null || (data.lastActiveDate is string && data.lastActiveDate.size() <= 50))
+        && (data.weekCommencedDate == null || (data.weekCommencedDate is string && data.weekCommencedDate.size() <= 50))
+        && (data.weeklyMinutes == null || data.weeklyMinutes is list);
     }
     
     function isValidTask(data, userId) {
