@@ -115,6 +115,19 @@ export default function App() {
   const [isBreak, setIsBreak] = useState(false);
   const [sessionsCompleted, setSessionsCompleted] = useState(0);
 
+  // Estadísticas del usuario persistidas en firestore
+  const [currentStreak, setCurrentStreak] = useState(0);
+  const [bestStreak, setBestStreak] = useState(0);
+  const [weeklyMinutes, setWeeklyMinutes] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
+  const [lastActiveDate, setLastActiveDate] = useState('');
+  const [weekCommencedDate, setWeekCommencedDate] = useState('');
+
+  // Ambient Sound Synthesis Engine using Web Audio API
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const masterGainRef = useRef<GainNode | null>(null);
+  const soundNodesRef = useRef<any[]>([]); // active oscillators or source nodes
+  const activeSoundRef = useRef<string>('');
+
   // Estados de carga e inputs de autenticación
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
@@ -128,69 +141,110 @@ export default function App() {
 
   // Escribir un perfil predeterminado o leerlo al iniciar sesión
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setLoading(true);
       setAuthError(null);
       if (firebaseUser) {
         setCurrentUserId(firebaseUser.uid);
         setAuthMode('loggedIn');
         
-        try {
-          const userDocRef = doc(db, 'users', firebaseUser.uid);
-          const userDocSnap = await getDoc(userDocRef);
+        // Pre-populamos de inmediato para evitar que "Cargando..." parpadee o se quede pegado
+        const tempName = firebaseUser.displayName || nameInput || 'Estudiante Zen';
+        setUser((prev) => ({
+          ...prev,
+          name: tempName,
+          email: firebaseUser.email || '',
+          avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
+          joinDate: new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long' })
+        }));
+      } else {
+        setCurrentUserId(null);
+        setAuthMode('login');
+        setTasks([]);
+        setUser({
+          name: 'Cargando...',
+          email: '',
+          avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
+          joinDate: 'Uniendo...'
+        });
+      }
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, [nameInput]);
+
+  // Sincronizar el perfil de usuario en tiempo real desde Firestore
+  useEffect(() => {
+    if (!currentUserId) return;
+    
+    const userDocRef = doc(db, 'users', currentUserId);
+    const unsubscribe = onSnapshot(userDocRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setUser({
+          name: data.name || 'Estudiante Zen',
+          email: data.email || '',
+          avatar: data.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
+          joinDate: data.joinDate || 'Junio 2026'
+        });
+        
+        setSessionConfig({
+          focusTime: typeof data.focusTime === 'number' ? data.focusTime : 25,
+          shortBreak: typeof data.shortBreak === 'number' ? data.shortBreak : 5,
+          longBreak: typeof data.longBreak === 'number' ? data.longBreak : 15
+        });
+        
+        if (data.activeSound) setActiveSound(data.activeSound);
+        if (typeof data.sessionsCompleted === 'number') {
+          setSessionsCompleted(data.sessionsCompleted);
+        }
+
+        // Cargar estadísticas sincronizadas
+        setCurrentStreak(typeof data.currentStreak === 'number' ? data.currentStreak : 0);
+        setBestStreak(typeof data.bestStreak === 'number' ? data.bestStreak : 0);
+        setLastActiveDate(data.lastActiveDate || '');
+        setWeekCommencedDate(data.weekCommencedDate || '');
+        if (Array.isArray(data.weeklyMinutes) && data.weeklyMinutes.length === 7) {
+          setWeeklyMinutes(data.weeklyMinutes);
+        } else {
+          setWeeklyMinutes([0, 0, 0, 0, 0, 0, 0]);
+        }
+      } else {
+        // Generar valores iniciales para un nuevo usuario
+        const firebaseUser = auth.currentUser;
+        if (firebaseUser) {
+          const initialProfile: UserProfile = {
+            name: firebaseUser.displayName || nameInput || 'Estudiante Zen',
+            email: firebaseUser.email || '',
+            avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
+            joinDate: new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long' })
+          };
           
-          if (userDocSnap.exists()) {
-            const data = userDocSnap.data();
-            setUser({
-              name: data.name || firebaseUser.displayName || 'Estudiante Zen',
-              email: data.email || firebaseUser.email || '',
-              avatar: data.avatar || firebaseUser.photoURL || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
-              joinDate: data.joinDate || 'Junio 2026'
-            });
-            
-            setSessionConfig({
-              focusTime: typeof data.focusTime === 'number' ? data.focusTime : 25,
-              shortBreak: typeof data.shortBreak === 'number' ? data.shortBreak : 5,
-              longBreak: typeof data.longBreak === 'number' ? data.longBreak : 15
-            });
-            
-            if (data.activeSound) setActiveSound(data.activeSound);
-            if (typeof data.sessionsCompleted === 'number') {
-              setSessionsCompleted(data.sessionsCompleted);
-            }
-          } else {
-            // Generar valores iniciales para un nuevo usuario
-            const initialProfile: UserProfile = {
-              name: firebaseUser.displayName || nameInput || 'Estudiante Zen',
-              email: firebaseUser.email || '',
-              avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
-              joinDate: new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long' })
-            };
-            
+          try {
             await setDoc(userDocRef, {
               ...initialProfile,
               focusTime: 25,
               shortBreak: 5,
               longBreak: 15,
               sessionsCompleted: 0,
-              activeSound: 'Lluvia'
+              activeSound: 'Lluvia',
+              currentStreak: 0,
+              bestStreak: 0,
+              lastActiveDate: '',
+              weekCommencedDate: '',
+              weeklyMinutes: [0, 0, 0, 0, 0, 0, 0]
             });
-            
-            setUser(initialProfile);
-            setSessionConfig({ focusTime: 25, shortBreak: 5, longBreak: 15 });
+          } catch (err) {
+            console.error("Error al inicializar perfil del usuario en Firestore:", err);
           }
-        } catch (err) {
-          console.error("Error al inicializar perfil del usuario en Firestore:", err);
         }
-      } else {
-        setCurrentUserId(null);
-        setAuthMode('login');
-        setTasks([]);
       }
-      setLoading(false);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.GET, `users/${currentUserId}`);
     });
+    
     return () => unsubscribe();
-  }, []);
+  }, [currentUserId]);
 
   // Sincronizar tareas en tiempo real
   useEffect(() => {
@@ -218,6 +272,271 @@ export default function App() {
     return () => unsubscribe();
   }, [currentUserId]);
 
+  // --- Ambient Sound Synthesis Engine using Web Audio API ---
+  const startAmbientSound = (soundName: string) => {
+    try {
+      // Initialize AudioContext
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+
+      // Stop previous sounds
+      stopAmbientSound();
+
+      // Ensure master gain is set up
+      if (!masterGainRef.current) {
+        masterGainRef.current = ctx.createGain();
+        masterGainRef.current.connect(ctx.destination);
+      }
+      // Start with volume 0 and fade in smoothly
+      masterGainRef.current.gain.setValueAtTime(0, ctx.currentTime);
+      masterGainRef.current.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 1.5);
+
+      activeSoundRef.current = soundName;
+      const nodes: any[] = [];
+
+      if (soundName === 'Ruido Blanco') {
+        const bufferSize = 2 * ctx.sampleRate;
+        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
+        }
+
+        const whiteNoise = ctx.createBufferSource();
+        whiteNoise.buffer = noiseBuffer;
+        whiteNoise.loop = true;
+
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(450, ctx.currentTime);
+
+        whiteNoise.connect(filter);
+        filter.connect(masterGainRef.current);
+        whiteNoise.start();
+
+        nodes.push(whiteNoise);
+      } else if (soundName === 'Lluvia') {
+        const bufferSize = 2 * ctx.sampleRate;
+        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
+        }
+
+        const rainSource = ctx.createBufferSource();
+        rainSource.buffer = noiseBuffer;
+        rainSource.loop = true;
+
+        const rainFilter = ctx.createBiquadFilter();
+        rainFilter.type = 'lowpass';
+        rainFilter.frequency.setValueAtTime(320, ctx.currentTime);
+
+        rainSource.connect(rainFilter);
+        rainFilter.connect(masterGainRef.current);
+        rainSource.start();
+        nodes.push(rainSource);
+
+        let dropletTimer: any = null;
+        const scheduleDroplet = () => {
+          if (activeSoundRef.current !== 'Lluvia' || !isActive || isBreak) return;
+          
+          const dropOsc = ctx.createOscillator();
+          const dropGain = ctx.createGain();
+          
+          dropOsc.type = 'sine';
+          const pitch = 250 + Math.random() * 400;
+          dropOsc.frequency.setValueAtTime(pitch, ctx.currentTime);
+          dropOsc.frequency.exponentialRampToValueAtTime(10, ctx.currentTime + 0.08);
+
+          dropGain.gain.setValueAtTime(0.08, ctx.currentTime);
+          dropGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+
+          dropOsc.connect(dropGain);
+          dropGain.connect(masterGainRef.current!);
+          dropOsc.start();
+          dropOsc.stop(ctx.currentTime + 0.1);
+
+          const nextInterval = 80 + Math.random() * 300;
+          dropletTimer = setTimeout(scheduleDroplet, nextInterval);
+        };
+        scheduleDroplet();
+        
+        const stopDroplets = {
+          stop: () => {
+            if (dropletTimer) clearTimeout(dropletTimer);
+          }
+        };
+        nodes.push(stopDroplets);
+      } else if (soundName === 'Bosque') {
+        const bufferSize = 2 * ctx.sampleRate;
+        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
+        }
+
+        const windSource = ctx.createBufferSource();
+        windSource.buffer = noiseBuffer;
+        windSource.loop = true;
+
+        const windFilter = ctx.createBiquadFilter();
+        windFilter.type = 'bandpass';
+        windFilter.frequency.setValueAtTime(350, ctx.currentTime);
+        windFilter.Q.setValueAtTime(1.5, ctx.currentTime);
+
+        windSource.connect(windFilter);
+        windFilter.connect(masterGainRef.current);
+        windSource.start();
+        nodes.push(windSource);
+
+        const breezeLfo = ctx.createOscillator();
+        const breezeLfoGain = ctx.createGain();
+        breezeLfo.frequency.setValueAtTime(0.08, ctx.currentTime);
+        breezeLfoGain.gain.setValueAtTime(120, ctx.currentTime);
+
+        breezeLfo.connect(breezeLfoGain);
+        breezeLfoGain.connect(windFilter.frequency);
+        breezeLfo.start();
+        nodes.push(breezeLfo);
+
+        let birdTimer: any = null;
+        const playBirdChirp = () => {
+          if (activeSoundRef.current !== 'Bosque' || !isActive || isBreak) return;
+
+          const chirpOsc = ctx.createOscillator();
+          const chirpGain = ctx.createGain();
+
+          chirpOsc.type = 'sine';
+          const startPitch = 2200 + Math.random() * 800;
+          chirpOsc.frequency.setValueAtTime(startPitch, ctx.currentTime);
+          chirpOsc.frequency.exponentialRampToValueAtTime(startPitch - 400, ctx.currentTime + 0.15);
+
+          chirpGain.gain.setValueAtTime(0, ctx.currentTime);
+          chirpGain.gain.linearRampToValueAtTime(0.02, ctx.currentTime + 0.02);
+          chirpGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+
+          chirpOsc.connect(chirpGain);
+          chirpGain.connect(masterGainRef.current!);
+          chirpOsc.start();
+          chirpOsc.stop(ctx.currentTime + 0.16);
+
+          birdTimer = setTimeout(playBirdChirp, 3000 + Math.random() * 7000);
+        };
+        birdTimer = setTimeout(playBirdChirp, 1500);
+
+        const stopBirds = {
+          stop: () => {
+            if (birdTimer) clearTimeout(birdTimer);
+          }
+        };
+        nodes.push(stopBirds);
+      } else if (soundName === 'Café') {
+        const bufferSize = ctx.sampleRate;
+        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
+        }
+
+        const cafeSource = ctx.createBufferSource();
+        cafeSource.buffer = noiseBuffer;
+        cafeSource.loop = true;
+
+        const cafeFilter = ctx.createBiquadFilter();
+        cafeFilter.type = 'lowpass';
+        cafeFilter.frequency.setValueAtTime(150, ctx.currentTime);
+
+        cafeSource.connect(cafeFilter);
+        cafeFilter.connect(masterGainRef.current);
+        cafeSource.start();
+        nodes.push(cafeSource);
+
+        let cafeTimer: any = null;
+        const playCafeDetail = () => {
+          if (activeSoundRef.current !== 'Café' || !isActive || isBreak) return;
+
+          const detailType = Math.random();
+          if (detailType < 0.7) {
+            const clickOsc = ctx.createOscillator();
+            const clickGain = ctx.createGain();
+            clickOsc.type = 'triangle';
+            clickOsc.frequency.setValueAtTime(140 + Math.random() * 80, ctx.currentTime);
+            clickGain.gain.setValueAtTime(0.05, ctx.currentTime);
+            clickGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.015);
+            clickOsc.connect(clickGain);
+            clickGain.connect(masterGainRef.current!);
+            clickOsc.start();
+            clickOsc.stop(ctx.currentTime + 0.02);
+          } else {
+            const clinkOsc = ctx.createOscillator();
+            const clinkGain = ctx.createGain();
+            clinkOsc.type = 'sine';
+            clinkOsc.frequency.setValueAtTime(3200 + Math.random() * 1200, ctx.currentTime);
+            clinkGain.gain.setValueAtTime(0.015, ctx.currentTime);
+            clinkGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.2);
+            clinkOsc.connect(clinkGain);
+            clinkGain.connect(masterGainRef.current!);
+            clinkOsc.start();
+            clinkOsc.stop(ctx.currentTime + 0.25);
+          }
+
+          cafeTimer = setTimeout(playCafeDetail, 150 + Math.random() * 800);
+        };
+        playCafeDetail();
+
+        const stopCafe = {
+          stop: () => {
+            if (cafeTimer) clearTimeout(cafeTimer);
+          }
+        };
+        nodes.push(stopCafe);
+      }
+
+      soundNodesRef.current = nodes;
+    } catch (e) {
+      console.warn("Could not start Web Audio:", e);
+    }
+  };
+
+  const stopAmbientSound = () => {
+    try {
+      if (masterGainRef.current && audioCtxRef.current) {
+        masterGainRef.current.gain.setValueAtTime(masterGainRef.current.gain.value, audioCtxRef.current.currentTime);
+        masterGainRef.current.gain.linearRampToValueAtTime(0, audioCtxRef.current.currentTime + 0.4);
+      }
+      setTimeout(() => {
+        soundNodesRef.current.forEach((node) => {
+          try {
+            if (node.stop && typeof node.stop === 'function') {
+              node.stop();
+            }
+          } catch (err) {}
+        });
+        soundNodesRef.current = [];
+        activeSoundRef.current = '';
+      }, 420);
+    } catch (e) {
+      console.warn("Could not stop audio safely:", e);
+    }
+  };
+
+  // Sound selection hook listening to study/break states
+  useEffect(() => {
+    if (isActive && !isBreak) {
+      startAmbientSound(activeSound);
+    } else {
+      stopAmbientSound();
+    }
+    return () => {
+      stopAmbientSound();
+    };
+  }, [isActive, activeSound, isBreak]);
+
   // Actualizar tiempo del temporizador cuando cambie la config
   useEffect(() => {
     if (!isActive) {
@@ -242,22 +561,80 @@ export default function App() {
     };
   }, [isActive, timeLeft]);
 
+  // Track and save study habit stats in real-time
+  const trackSessionCompletion = async (nextSessions: number) => {
+    if (!currentUserId) return;
+    
+    // YYYY-MM-DD in local representation
+    const localDate = new Date();
+    const todayStr = localDate.toLocaleDateString('en-CA');
+    const todayDayOfWeek = (localDate.getDay() + 6) % 7; // Mon=0, Tue=1, ..., Sun=6
+    
+    let newCurrentStreak = currentStreak;
+    let newBestStreak = bestStreak;
+    let newWeeklyMinutes = [...weeklyMinutes];
+    
+    const getMondayDateStr = (d: Date) => {
+      const copy = new Date(d);
+      const day = copy.getDay();
+      const diff = copy.getDate() - day + (day === 0 ? -6 : 1);
+      const mon = new Date(copy.setDate(diff));
+      return mon.toLocaleDateString('en-CA');
+    };
+    const currentWeekCommenced = getMondayDateStr(new Date());
+    
+    if (weekCommencedDate !== currentWeekCommenced) {
+      newWeeklyMinutes = [0, 0, 0, 0, 0, 0, 0];
+    }
+    
+    newWeeklyMinutes[todayDayOfWeek] = (newWeeklyMinutes[todayDayOfWeek] || 0) + sessionConfig.focusTime;
+    
+    if (lastActiveDate === todayStr) {
+      // already focused today, keep streak same
+    } else {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toLocaleDateString('en-CA');
+      
+      if (lastActiveDate === yesterdayStr || lastActiveDate === '') {
+        newCurrentStreak += 1;
+      } else {
+        newCurrentStreak = 1;
+      }
+    }
+    
+    if (newCurrentStreak > newBestStreak) {
+      newBestStreak = newCurrentStreak;
+    }
+    
+    setCurrentStreak(newCurrentStreak);
+    setBestStreak(newBestStreak);
+    setWeeklyMinutes(newWeeklyMinutes);
+    setLastActiveDate(todayStr);
+    setWeekCommencedDate(currentWeekCommenced);
+    
+    try {
+      await updateDoc(doc(db, 'users', currentUserId), {
+        sessionsCompleted: nextSessions,
+        currentStreak: newCurrentStreak,
+        bestStreak: newBestStreak,
+        lastActiveDate: todayStr,
+        weekCommencedDate: currentWeekCommenced,
+        weeklyMinutes: newWeeklyMinutes
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}`);
+    }
+  };
+
   const handleTimerComplete = async () => {
     setIsActive(false);
     if (!isBreak) {
       const nextSessions = sessionsCompleted + 1;
       setSessionsCompleted(nextSessions);
       
-      // Persistir incremento de sesiones en Firestore
-      if (currentUserId) {
-        try {
-          await updateDoc(doc(db, 'users', currentUserId), {
-            sessionsCompleted: nextSessions
-          });
-        } catch (err) {
-          handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}`);
-        }
-      }
+      // Persistir incremento de sesiones y estadísticas en Firestore
+      await trackSessionCompletion(nextSessions);
       
       alert('¡Sesión terminada! Tómate un descanso.');
       const nextBreak = nextSessions % 4 === 0 ? sessionConfig.longBreak : sessionConfig.shortBreak;
@@ -294,6 +671,7 @@ export default function App() {
       title,
       date,
       difficulty,
+      userId: currentUserId,
       sessions: difficulty === 'Alta' ? 5 : difficulty === 'Media' ? 3 : 1,
       completed: false
     };
@@ -418,8 +796,8 @@ export default function App() {
       // El observer onAuthStateChanged manejará el registro del documento del perfil.
     } catch (error: any) {
       console.error(error);
-      if (error.code === 'auth/operation-not-allowed') {
-        setAuthError("El proveedor de Correo/Contraseña no está habilitado en Firebase. Por favor actívalo en el panel del proyecto o inicia con Google.");
+      if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/configuration-not-found') {
+        setAuthError("El método de Correo/Contraseña no está habilitado en Firebase. Actívalo en la consola de Firebase -> Authentication -> Sign-in method.");
       } else {
         setAuthError(error.message || "Error al registrarse.");
       }
@@ -440,8 +818,8 @@ export default function App() {
       await signInWithEmailAndPassword(auth, emailInput, passwordInput);
     } catch (error: any) {
       console.error(error);
-      if (error.code === 'auth/operation-not-allowed') {
-        setAuthError("El proveedor de Correo/Contraseña no está habilitado en Firebase. Por favor actívalo en el panel o inicia con Google.");
+      if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/configuration-not-found') {
+        setAuthError("El método de Correo/Contraseña no está habilitado en Firebase. Actívalo en la consola de Firebase -> Authentication -> Sign-in method.");
       } else if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found') {
         setAuthError("Credenciales inválidas o correo no registrado.");
       } else {
@@ -849,19 +1227,19 @@ export default function App() {
                   <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-20 transition-opacity bg-primary-container rounded-bl-3xl">
                     <CheckCircle2 className="w-12 h-12" />
                   </div>
-                  <span className="text-xs font-bold uppercase tracking-widest text-primary-container">+12% vs SP</span>
+                  <span className="text-xs font-bold uppercase tracking-widest text-primary-container">{sessionsCompleted > 0 ? 'Ritmo Óptimo' : 'Inicia Sesión'}</span>
                   <div>
                     <p className="text-3xl font-bold">{sessionsCompleted}</p>
-                    <p className="text-xs font-semibold opacity-50 uppercase tracking-widest">Sesiones Completes</p>
+                    <p className="text-xs font-semibold opacity-50 uppercase tracking-widest">Sesiones Realizadas</p>
                   </div>
                 </div>
                 <div className="glass p-5 rounded-3xl flex flex-col justify-between h-32 relative overflow-hidden group">
                   <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-20 transition-opacity bg-secondary rounded-bl-3xl">
                     <Flame className="w-12 h-12" />
                   </div>
-                  <span className="text-xs font-bold uppercase tracking-widest text-secondary">Flujo Élite</span>
+                  <span className="text-xs font-bold uppercase tracking-widest text-secondary">{currentStreak > 0 ? 'Foco Conectado' : 'Sin Racha'}</span>
                   <div>
-                    <p className="text-3xl font-bold">15 Días</p>
+                    <p className="text-3xl font-bold">{currentStreak} {currentStreak === 1 ? 'Día' : 'Días'}</p>
                     <p className="text-xs font-semibold opacity-50 uppercase tracking-widest">Racha Actual</p>
                   </div>
                 </div>
@@ -873,25 +1251,29 @@ export default function App() {
                     <h3 className="font-bold">Desempeño Semanal</h3>
                     <p className="text-xs opacity-50 uppercase tracking-widest font-semibold">Minutos de enfoque</p>
                   </div>
-                  <div className="flex gap-2 text-[10px] font-bold">
-                    <button className="px-3 py-1 glass rounded-lg">SEMANA</button>
-                    <button className="px-3 py-1 bg-primary-container text-slate-900 rounded-lg">MES</button>
-                  </div>
                 </div>
-                <div className="h-40 flex items-end justify-between gap-2 px-2">
-                  {[40, 85, 65, 95, 55, 30, 20].map((val, i) => (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-3">
-                      <motion.div 
-                        initial={{ height: 0 }}
-                        animate={{ height: `${val}%` }}
-                        transition={{ delay: i * 0.1, duration: 1 }}
-                        className={`w-full rounded-t-lg relative group ${val > 70 ? 'bg-primary-container/40' : 'bg-white/10'}`}
-                      >
-                        <div className={`absolute inset-0 rounded-t-lg transition-opacity group-hover:opacity-100 opacity-60 ${val > 70 ? 'bg-primary-container shadow-[0_0_15px_rgba(168,230,207,0.3)]' : 'bg-white/20'}`}></div>
-                      </motion.div>
-                      <span className="text-[10px] font-bold opacity-30">{'LM MJVSD'[i]}</span>
-                    </div>
-                  ))}
+                <div className="h-44 flex items-end justify-between gap-3 px-2">
+                  {weeklyMinutes.map((val, i) => {
+                    const maxVal = Math.max(...weeklyMinutes, 30);
+                    const pct = (val / maxVal) * 100;
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center gap-2">
+                        <span className="text-[9px] font-mono font-bold text-primary-container">{val}m</span>
+                        <div className="w-full relative group h-28 flex items-end">
+                          <motion.div
+                            initial={{ height: 0 }}
+                            animate={{ height: `${pct}%` }}
+                            transition={{ delay: i * 0.05, duration: 0.8, ease: "easeOut" }}
+                            className={`w-full rounded-t-lg relative ${val > 0 ? 'bg-primary-container shadow-[0_0_12px_rgba(168,230,207,0.3)]' : 'bg-white/5'}`}
+                            style={{ minHeight: val > 0 ? '4px' : '0px' }}
+                          >
+                            <div className="absolute inset-0 rounded-t-lg bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </motion.div>
+                        </div>
+                        <span className="text-[10px] font-bold opacity-40">{'LMMJVSD'[i]}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </motion.div>
@@ -946,14 +1328,18 @@ export default function App() {
                       <h2 className="text-2xl font-bold">{user.name}</h2>
                       <p className="text-xs uppercase tracking-[0.3em] font-bold text-primary-container mt-1">Miembro Zenith Pro</p>
                       
-                      <div className="flex gap-4 mt-6">
-                        <div className="glass px-6 py-3 rounded-2xl text-center">
-                          <p className="text-xl font-bold">{sessionsCompleted * 25}</p>
-                          <p className="text-[10px] uppercase tracking-widest font-bold opacity-50">Minutos Focus</p>
+                      <div className="grid grid-cols-3 gap-3 mt-6 w-full px-2">
+                        <div className="glass p-3 rounded-2xl text-center">
+                          <p className="text-lg font-bold">{sessionsCompleted * sessionConfig.focusTime}</p>
+                          <p className="text-[9px] uppercase tracking-wider font-bold opacity-50">Minutos Focus</p>
                         </div>
-                        <div className="glass px-6 py-3 rounded-2xl text-center">
-                          <p className="text-xl font-bold">15</p>
-                          <p className="text-[10px] uppercase tracking-widest font-bold opacity-50">Mejor Racha</p>
+                        <div className="glass p-3 rounded-2xl text-center">
+                          <p className="text-lg font-bold">{currentStreak}</p>
+                          <p className="text-[9px] uppercase tracking-wider font-bold opacity-50">Racha Actual</p>
+                        </div>
+                        <div className="glass p-3 rounded-2xl text-center">
+                          <p className="text-lg font-bold">{bestStreak}</p>
+                          <p className="text-[9px] uppercase tracking-wider font-bold opacity-50">Mejor Racha</p>
                         </div>
                       </div>
                     </div>
