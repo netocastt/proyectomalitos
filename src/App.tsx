@@ -26,7 +26,9 @@ import {
   Camera,
   Mail,
   Lock,
-  UserPlus
+  UserPlus,
+  Check,
+  Edit2 as Edit3
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -138,6 +140,10 @@ export default function App() {
   // Perfil y Modales
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Estados para edición directa de nombre
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempNameText, setTempNameText] = useState('');
 
   // Escribir un perfil predeterminado o leerlo al iniciar sesión
   useEffect(() => {
@@ -751,6 +757,19 @@ export default function App() {
     }
   };
 
+  // Guardar nombre directamente (sin alertas redundantes o retrasos)
+  const saveProfileNameDirectly = async (newName: string) => {
+    if (!currentUserId || !newName.trim()) return;
+    try {
+      setUser(prev => ({ ...prev, name: newName.trim() }));
+      await updateDoc(doc(db, 'users', currentUserId), {
+        name: newName.trim()
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}`);
+    }
+  };
+
   // Actualizar configuración de sesión en base de datos
   const updateSessionConfig = async (key: keyof SessionConfig, value: number) => {
     const updated = { ...sessionConfig, [key]: value };
@@ -1325,8 +1344,57 @@ export default function App() {
                           />
                         </motion.div>
                       </div>
-                      <h2 className="text-2xl font-bold">{user.name}</h2>
-                      <p className="text-xs uppercase tracking-[0.3em] font-bold text-primary-container mt-1">Miembro Zenith Pro</p>
+                      {isEditingName ? (
+                        <div className="flex items-center gap-2 mt-4 justify-center w-full max-w-xs">
+                          <input
+                            type="text"
+                            value={tempNameText}
+                            onChange={(e) => setTempNameText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                saveProfileNameDirectly(tempNameText);
+                                setIsEditingName(false);
+                              } else if (e.key === 'Escape') {
+                                setIsEditingName(false);
+                              }
+                            }}
+                            className="bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-center text-lg outline-none focus:ring-1 focus:ring-primary-container font-medium text-white w-full"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => {
+                              saveProfileNameDirectly(tempNameText);
+                              setIsEditingName(false);
+                            }}
+                            className="p-2 bg-primary-container text-slate-900 rounded-lg active:scale-90 transition-transform cursor-pointer shrink-0"
+                            title="Guardar"
+                          >
+                            <Check className="w-5 h-5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 justify-center mt-4 group">
+                          <h2 
+                            onClick={() => {
+                              setTempNameText(user.name);
+                              setIsEditingName(true);
+                            }}
+                            className="text-2xl font-bold cursor-pointer hover:text-primary-container transition-colors"
+                          >
+                            {user.name}
+                          </h2>
+                          <button
+                            onClick={() => {
+                              setTempNameText(user.name);
+                              setIsEditingName(true);
+                            }}
+                            className="p-1 text-on-surface-variant hover:text-primary-container transition-colors opacity-60 group-hover:opacity-100"
+                            title="Editar nombre directamente"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
                       
                       <div className="grid grid-cols-3 gap-3 mt-6 w-full px-2">
                         <div className="glass p-3 rounded-2xl text-center">
@@ -1370,15 +1438,6 @@ export default function App() {
                           </div>
                         ))}
                       </div>
-                    </div>
-
-                    <div className="relative overflow-hidden rounded-3xl p-6 border border-primary-container/30 bg-gradient-to-br from-primary-container/10 to-transparent flex flex-col items-center text-center gap-4 group">
-                      <div className="absolute -top-10 -right-10 w-32 h-32 bg-primary-container/10 blur-3xl"></div>
-                      <h4 className="text-xl font-bold text-primary-container">Zenith Platinum</h4>
-                      <p className="text-sm opacity-70">Desbloquea análisis avanzados y paisajes sonoros exclusivos.</p>
-                      <button className="w-full py-3 bg-primary-container text-slate-900 font-bold rounded-xl uppercase tracking-widest text-xs hover:scale-105 active:scale-95 transition-all">
-                        Gestionar Membresía
-                      </button>
                     </div>
 
                     <button 
