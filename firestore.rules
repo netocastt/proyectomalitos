@@ -32,7 +32,7 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.name is string && data.name.size() <= 200
         && data.email is string && data.email.size() <= 200
-        && (data.avatar == null || (data.avatar is string && data.avatar.size() <= 1000000))
+        && (data.avatar == null || (data.avatar is string && data.avatar.size() <= 10000000))
         && (data.joinDate == null || (data.joinDate is string && data.joinDate.size() <= 50))
         && (data.focusTime == null || data.focusTime is int)
         && (data.shortBreak == null || data.shortBreak is int)
