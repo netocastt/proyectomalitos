@@ -34,13 +34,13 @@ service cloud.firestore {
         && data.email is string && data.email.size() <= 200
         && (data.avatar == null || (data.avatar is string && data.avatar.size() <= 10000000))
         && (data.joinDate == null || (data.joinDate is string && data.joinDate.size() <= 50))
-        && (data.focusTime == null || data.focusTime is int)
-        && (data.shortBreak == null || data.shortBreak is int)
-        && (data.longBreak == null || data.longBreak is int)
+        && (data.focusTime == null || data.focusTime is int || data.focusTime is float)
+        && (data.shortBreak == null || data.shortBreak is int || data.shortBreak is float)
+        && (data.longBreak == null || data.longBreak is int || data.longBreak is float)
         && (data.activeSound == null || (data.activeSound is string && data.activeSound.size() <= 100))
-        && (data.sessionsCompleted == null || data.sessionsCompleted is int)
-        && (data.currentStreak == null || data.currentStreak is int)
-        && (data.bestStreak == null || data.bestStreak is int)
+        && (data.sessionsCompleted == null || data.sessionsCompleted is int || data.sessionsCompleted is float)
+        && (data.currentStreak == null || data.currentStreak is int || data.currentStreak is float)
+        && (data.bestStreak == null || data.bestStreak is int || data.bestStreak is float)
         && (data.lastActiveDate == null || (data.lastActiveDate is string && data.lastActiveDate.size() <= 50))
         && (data.weekCommencedDate == null || (data.weekCommencedDate is string && data.weekCommencedDate.size() <= 50))
         && (data.weeklyMinutes == null || data.weeklyMinutes is list);
@@ -51,7 +51,7 @@ service cloud.firestore {
         && data.title is string && data.title.size() <= 500
         && data.completed is bool
         && (data.difficulty == null || (data.difficulty is string && data.difficulty.size() <= 50))
-        && (data.sessions == null || data.sessions is int)
+        && (data.sessions == null || data.sessions is int || data.sessions is float)
         && (data.date == null || (data.date is string && data.date.size() <= 50));
     }
     
