@@ -145,6 +145,53 @@ export default function App() {
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempNameText, setTempNameText] = useState('');
 
+  // Estados controlados para formularios de edición de perfil y creación de tareas
+  const [editProfileName, setEditProfileName] = useState('');
+  const [editProfileEmail, setEditProfileEmail] = useState('');
+  const [taskTitleInput, setTaskTitleInput] = useState('');
+  const [taskDateInput, setTaskDateInput] = useState('');
+  const [taskDifficultyInput, setTaskDifficultyInput] = useState<Task['difficulty']>('Media');
+
+  // Helper para comprimir y recortar fotos de perfil a un tamaño óptimo
+  const compressImage = (base64Str: string, maxWidth = 200, maxHeight = 200): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = base64Str;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        const size = Math.min(width, height);
+        canvas.width = maxWidth;
+        canvas.height = maxHeight;
+
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(
+            img,
+            (width - size) / 2, (height - size) / 2, size, size,
+            0, 0, maxWidth, maxHeight
+          );
+          resolve(canvas.toDataURL('image/jpeg', 0.8));
+        } else {
+          resolve(base64Str);
+        }
+      };
+      img.onerror = () => {
+        resolve(base64Str);
+      };
+    });
+  };
+
+  // Sincronizar estados locales de edición de perfil cuando la pantalla cambie o el perfil cambie
+  useEffect(() => {
+    if (activeSubScreen === 'profile-settings') {
+      setEditProfileName(user.name);
+      setEditProfileEmail(user.email);
+    }
+  }, [activeSubScreen, user.name, user.email]);
+
   // Escribir un perfil predeterminado o leerlo al iniciar sesión
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
@@ -154,15 +201,20 @@ export default function App() {
         setCurrentUserId(firebaseUser.uid);
         setAuthMode('loggedIn');
         
-        // Pre-populamos de inmediato para evitar que "Cargando..." parpadee o se quede pegado
-        const tempName = firebaseUser.displayName || nameInput || 'Estudiante Zen';
-        setUser((prev) => ({
-          ...prev,
-          name: tempName,
-          email: firebaseUser.email || '',
-          avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
-          joinDate: new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long' })
-        }));
+        // Pre-populamos de inmediato para evitar que "Cargando..." parpadee o se quede pegado, pero sin sobreescribir datos ya leídos de base de datos
+        setUser((prev) => {
+          if (prev.name !== 'Cargando...' && prev.name !== 'Estudiante Zen') {
+            return prev;
+          }
+          const tempName = firebaseUser.displayName || nameInput || 'Estudiante Zen';
+          return {
+            ...prev,
+            name: tempName,
+            email: firebaseUser.email || '',
+            avatar: firebaseUser.photoURL || prev.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
+            joinDate: prev.joinDate !== 'Uniendo...' ? prev.joinDate : new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long' })
+          };
+        });
       } else {
         setCurrentUserId(null);
         setAuthMode('login');
@@ -708,21 +760,28 @@ export default function App() {
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > 20 * 1024 * 1024) {
+        alert("La imagen es demasiado grande. Selecciona una foto menor de 20MB.");
+        return;
+      }
       const reader = new FileReader();
       reader.onloadend = async () => {
-        const base64Avatar = reader.result as string;
-        setUser(prev => ({ ...prev, avatar: base64Avatar }));
-        
-        if (currentUserId) {
-          try {
+        const rawBase64 = reader.result as string;
+        try {
+          // Comprimir y recortar a un tamaño óptimo para avatares (200x200 jpeg)
+          const compressedBase64 = await compressImage(rawBase64, 200, 200);
+          setUser(prev => ({ ...prev, avatar: compressedBase64 }));
+          
+          if (currentUserId) {
             await updateDoc(doc(db, 'users', currentUserId), {
-              avatar: base64Avatar
+              avatar: compressedBase64
             });
-          } catch (err) {
-            handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}`);
           }
+          alert('¡Foto de perfil actualizada con éxito!');
+        } catch (err: any) {
+          console.error("Error al procesar/guardar la foto de perfil:", err);
+          alert(`No se pudo guardar la imagen: ${err.message || err}`);
         }
-        alert('¡Foto de perfil actualizada con éxito!');
       };
       reader.readAsDataURL(file);
     }
@@ -752,8 +811,9 @@ export default function App() {
       setUser(prev => ({ ...prev, name: newName, email: newEmail }));
       alert('¡Perfil actualizado correctamente!');
       setActiveSubScreen('none');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}`);
+    } catch (err: any) {
+      console.error("Error al guardar perfil:", err);
+      alert(`No se pudo actualizar el perfil: ${err.message || err}`);
     }
   };
 
@@ -765,8 +825,9 @@ export default function App() {
       await updateDoc(doc(db, 'users', currentUserId), {
         name: newName.trim()
       });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}`);
+    } catch (err: any) {
+      console.error("Error al guardar nombre directamente:", err);
+      alert(`No se pudo actualizar el nombre directamente: ${err.message || err}`);
     }
   };
 
@@ -1148,19 +1209,22 @@ export default function App() {
                 <div className="space-y-4">
                   <input 
                     type="text" 
-                    id="materiaInput"
+                    value={taskTitleInput}
+                    onChange={(e) => setTaskTitleInput(e.target.value)}
                     placeholder="Asignatura o Proyecto" 
                     className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:ring-1 focus:ring-primary-container transition-all"
                   />
                   <div className="grid grid-cols-2 gap-3">
                     <input 
                       type="date" 
-                      id="fechaInput"
-                      className="bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:ring-1 focus:ring-primary-container transition-all text-sm"
+                      value={taskDateInput}
+                      onChange={(e) => setTaskDateInput(e.target.value)}
+                      className="bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:ring-1 focus:ring-primary-container transition-all text-sm animate-none"
                     />
                     <select 
-                      id="dificultadInput"
-                      className="bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:ring-1 focus:ring-primary-container transition-all text-sm"
+                      value={taskDifficultyInput}
+                      onChange={(e) => setTaskDifficultyInput(e.target.value as Task['difficulty'])}
+                      className="bg-slate-900 border border-white/10 rounded-xl p-3 outline-none focus:ring-1 focus:ring-primary-container transition-all text-sm [color-scheme:dark]"
                     >
                       <option value="Baja">Relajado</option>
                       <option value="Media">Media</option>
@@ -1169,12 +1233,11 @@ export default function App() {
                   </div>
                   <button 
                     onClick={() => {
-                      const m = document.getElementById('materiaInput') as HTMLInputElement;
-                      const f = document.getElementById('fechaInput') as HTMLInputElement;
-                      const d = document.getElementById('dificultadInput') as HTMLSelectElement;
-                      if (m.value && f.value) {
-                        addTask(m.value, f.value, d.value as Task['difficulty']);
-                        m.value = ''; f.value = '';
+                      if (taskTitleInput.trim() && taskDateInput) {
+                        addTask(taskTitleInput.trim(), taskDateInput, taskDifficultyInput);
+                        setTaskTitleInput('');
+                        setTaskDateInput('');
+                        setTaskDifficultyInput('Media');
                       } else {
                         alert("Por favor, llena la asignatura y la fecha.");
                       }
@@ -1468,8 +1531,8 @@ export default function App() {
                         <label className="text-xs font-bold uppercase tracking-widest opacity-50 px-1">Nombre</label>
                         <input 
                           type="text" 
-                          id="editProfileName"
-                          defaultValue={user.name}
+                          value={editProfileName}
+                          onChange={(e) => setEditProfileName(e.target.value)}
                           className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none focus:ring-1 focus:ring-primary-container"
                         />
                       </div>
@@ -1477,18 +1540,15 @@ export default function App() {
                         <label className="text-xs font-bold uppercase tracking-widest opacity-50 px-1">Correo Electrónico</label>
                         <input 
                           type="email" 
-                          id="editProfileEmail"
-                          defaultValue={user.email}
+                          value={editProfileEmail}
                           disabled
                           className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none opacity-50 cursor-not-allowed"
                         />
                       </div>
                       <button 
                         onClick={() => {
-                          const n = (document.getElementById('editProfileName') as HTMLInputElement).value;
-                          const e = (document.getElementById('editProfileEmail') as HTMLInputElement).value;
-                          if (n) {
-                            saveProfileChanges(n, e);
+                          if (editProfileName.trim()) {
+                            saveProfileChanges(editProfileName.trim(), editProfileEmail);
                           } else {
                             alert("Por favor, ingresa tu nombre.");
                           }
