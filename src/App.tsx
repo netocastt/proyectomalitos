@@ -812,14 +812,17 @@ export default function App() {
   };
 
   // Guardar Cambios del Perfil
-  const saveProfileChanges = async (newName: string, newEmail: string) => {
-    if (!currentUserId) return;
+  const saveProfileChanges = async (newName: string) => {
+    const activeUid = currentUserId || auth.currentUser?.uid;
+    if (!activeUid) {
+      showToast("No se detectó un usuario autenticado legítimo.", "error");
+      return;
+    }
     try {
-      await updateDoc(doc(db, 'users', currentUserId), {
-        name: newName,
-        email: newEmail
+      await updateDoc(doc(db, 'users', activeUid), {
+        name: newName
       });
-      setUser(prev => ({ ...prev, name: newName, email: newEmail }));
+      setUser(prev => ({ ...prev, name: newName }));
       showToast('¡Perfil actualizado correctamente!', 'success');
       setActiveSubScreen('none');
     } catch (err: any) {
@@ -830,10 +833,11 @@ export default function App() {
 
   // Guardar nombre directamente (sin alertas redundantes o retrasos)
   const saveProfileNameDirectly = async (newName: string) => {
-    if (!currentUserId || !newName.trim()) return;
+    const activeUid = currentUserId || auth.currentUser?.uid;
+    if (!activeUid || !newName.trim()) return;
     try {
       setUser(prev => ({ ...prev, name: newName.trim() }));
-      await updateDoc(doc(db, 'users', currentUserId), {
+      await updateDoc(doc(db, 'users', activeUid), {
         name: newName.trim()
       });
       showToast('Nombre actualizado correctamente', 'success');
@@ -1560,7 +1564,7 @@ export default function App() {
                       <button 
                         onClick={() => {
                           if (editProfileName.trim()) {
-                            saveProfileChanges(editProfileName.trim(), editProfileEmail);
+                            saveProfileChanges(editProfileName.trim());
                           } else {
                             showToast("Por favor, ingresa tu nombre.", "error");
                           }
