@@ -137,6 +137,19 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
 
+  // Sistema de notificaciones (Toast) personalizado para evitar window.alert bloqueados en el iframe de vista previa
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    setToast({ message, type });
+    toastTimeoutRef.current = setTimeout(() => {
+      setToast(null);
+    }, 4000);
+  };
+
   // Perfil y Modales
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -694,12 +707,12 @@ export default function App() {
       // Persistir incremento de sesiones y estadísticas en Firestore
       await trackSessionCompletion(nextSessions);
       
-      alert('¡Sesión terminada! Tómate un descanso.');
+      showToast('¡Sesión terminada! Tómate un descanso.', 'success');
       const nextBreak = nextSessions % 4 === 0 ? sessionConfig.longBreak : sessionConfig.shortBreak;
       setTimeLeft(nextBreak * 60);
       setIsBreak(true);
     } else {
-      alert('¡Descanso terminado! ¿Listo para otra sesión?');
+      showToast('¡Descanso terminado! ¿Listo para otra sesión?', 'info');
       setTimeLeft(sessionConfig.focusTime * 60);
       setIsBreak(false);
     }
@@ -761,7 +774,7 @@ export default function App() {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 20 * 1024 * 1024) {
-        alert("La imagen es demasiado grande. Selecciona una foto menor de 20MB.");
+        showToast("La imagen es demasiado grande. Selecciona una foto menor de 20MB.", "error");
         return;
       }
       const reader = new FileReader();
@@ -777,10 +790,10 @@ export default function App() {
               avatar: compressedBase64
             });
           }
-          alert('¡Foto de perfil actualizada con éxito!');
+          showToast('¡Foto de perfil actualizada con éxito!', 'success');
         } catch (err: any) {
           console.error("Error al procesar/guardar la foto de perfil:", err);
-          alert(`No se pudo guardar la imagen: ${err.message || err}`);
+          showToast(`No se pudo guardar la imagen: ${err.message || err}`, 'error');
         }
       };
       reader.readAsDataURL(file);
@@ -788,15 +801,13 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    const confirmLogout = window.confirm('¿Estás seguro de que deseas cerrar sesión?');
-    if (confirmLogout) {
-      setIsActive(false);
-      try {
-        await signOut(auth);
-        setAuthMode('login');
-      } catch (err) {
-        console.error("Error al cerrar sesión:", err);
-      }
+    setIsActive(false);
+    try {
+      await signOut(auth);
+      setAuthMode('login');
+      showToast('Sesión cerrada con éxito', 'info');
+    } catch (err) {
+      console.error("Error al cerrar sesión:", err);
     }
   };
 
@@ -809,11 +820,11 @@ export default function App() {
         email: newEmail
       });
       setUser(prev => ({ ...prev, name: newName, email: newEmail }));
-      alert('¡Perfil actualizado correctamente!');
+      showToast('¡Perfil actualizado correctamente!', 'success');
       setActiveSubScreen('none');
     } catch (err: any) {
       console.error("Error al guardar perfil:", err);
-      alert(`No se pudo actualizar el perfil: ${err.message || err}`);
+      showToast(`No se pudo actualizar el perfil: ${err.message || err}`, 'error');
     }
   };
 
@@ -825,9 +836,10 @@ export default function App() {
       await updateDoc(doc(db, 'users', currentUserId), {
         name: newName.trim()
       });
+      showToast('Nombre actualizado correctamente', 'success');
     } catch (err: any) {
       console.error("Error al guardar nombre directamente:", err);
-      alert(`No se pudo actualizar el nombre directamente: ${err.message || err}`);
+      showToast(`No se pudo actualizar el nombre directamente: ${err.message || err}`, 'error');
     }
   };
 
@@ -1239,7 +1251,7 @@ export default function App() {
                         setTaskDateInput('');
                         setTaskDifficultyInput('Media');
                       } else {
-                        alert("Por favor, llena la asignatura y la fecha.");
+                        showToast("Por favor, llena la asignatura y la fecha.", "error");
                       }
                     }}
                     className="w-full py-3 bg-primary-container text-slate-900 font-bold rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
@@ -1533,7 +1545,7 @@ export default function App() {
                           type="text" 
                           value={editProfileName}
                           onChange={(e) => setEditProfileName(e.target.value)}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none focus:ring-1 focus:ring-primary-container"
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none focus:ring-1 focus:ring-primary-container text-white"
                         />
                       </div>
                       <div className="space-y-2">
@@ -1542,7 +1554,7 @@ export default function App() {
                           type="email" 
                           value={editProfileEmail}
                           disabled
-                          className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none opacity-50 cursor-not-allowed"
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none opacity-50 cursor-not-allowed text-white/70"
                         />
                       </div>
                       <button 
@@ -1550,7 +1562,7 @@ export default function App() {
                           if (editProfileName.trim()) {
                             saveProfileChanges(editProfileName.trim(), editProfileEmail);
                           } else {
-                            alert("Por favor, ingresa tu nombre.");
+                            showToast("Por favor, ingresa tu nombre.", "error");
                           }
                         }}
                         className="w-full py-4 bg-primary-container text-slate-900 font-bold rounded-xl active:scale-95 transition-all cursor-pointer"
@@ -1678,6 +1690,20 @@ export default function App() {
           ))}
         </div>
       </nav>
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="fixed bottom-24 left-6 right-6 md:left-auto md:right-6 md:max-w-sm z-50 p-4 rounded-2xl glass border border-white/20 shadow-2xl flex items-center gap-3"
+          >
+            <div className={`w-2 h-2 rounded-full shrink-0 ${toast.type === 'success' ? 'bg-primary-container shadow-[0_0_8px_#a8e6cf]' : toast.type === 'error' ? 'bg-red-500 shadow-[0_0_8px_#ef4444]' : 'bg-blue-400 shadow-[0_0_8px_#60a5fa]'}`} />
+            <p className="text-sm font-bold tracking-tight text-white">{toast.message}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
