@@ -28,7 +28,11 @@ import {
   Lock,
   UserPlus,
   Check,
-  Edit2 as Edit3
+  Edit2 as Edit3,
+  Music,
+  Trash2,
+  Link,
+  Upload
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -45,7 +49,8 @@ import {
   createUserWithEmailAndPassword, 
   signOut, 
   signInWithPopup, 
-  GoogleAuthProvider 
+  GoogleAuthProvider,
+  updateProfile
 } from 'firebase/auth';
 import { 
   doc, 
@@ -81,6 +86,12 @@ interface UserProfile {
   joinDate: string;
 }
 
+interface CustomSound {
+  id: string;
+  name: string;
+  url: string;
+}
+
 interface SessionConfig {
   focusTime: number;
   shortBreak: number;
@@ -92,6 +103,10 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('focus');
   const [activeSubScreen, setActiveSubScreen] = useState<SubScreen>('none');
+  
+  // Sonidos Personalizados del Usuario
+  const [customSounds, setCustomSounds] = useState<CustomSound[]>([]);
+  const customAudioRef = useRef<HTMLAudioElement | null>(null);
   
   // Datos del Usuario
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -164,6 +179,12 @@ export default function App() {
   const [taskTitleInput, setTaskTitleInput] = useState('');
   const [taskDateInput, setTaskDateInput] = useState('');
   const [taskDifficultyInput, setTaskDifficultyInput] = useState<Task['difficulty']>('Media');
+
+  // Estados para agregar sonidos o música personalizados
+  const [showAddSoundForm, setShowAddSoundForm] = useState(false);
+  const [newSoundName, setNewSoundName] = useState('');
+  const [newSoundUrl, setNewSoundUrl] = useState('');
+  const [newSoundType, setNewSoundType] = useState<'url' | 'upload'>('url');
 
   // Helper para comprimir y recortar fotos de perfil a un tamaño óptimo
   const compressImage = (base64Str: string, maxWidth = 200, maxHeight = 200): Promise<string> => {
@@ -280,6 +301,11 @@ export default function App() {
         } else {
           setWeeklyMinutes([0, 0, 0, 0, 0, 0, 0]);
         }
+        if (Array.isArray(data.customSounds)) {
+          setCustomSounds(data.customSounds);
+        } else {
+          setCustomSounds([]);
+        }
       } else {
         // Generar valores iniciales para un nuevo usuario
         const firebaseUser = auth.currentUser;
@@ -303,7 +329,8 @@ export default function App() {
               bestStreak: 0,
               lastActiveDate: '',
               weekCommencedDate: '',
-              weeklyMinutes: [0, 0, 0, 0, 0, 0, 0]
+              weeklyMinutes: [0, 0, 0, 0, 0, 0, 0],
+              customSounds: []
             });
           } catch (err) {
             console.error("Error al inicializar perfil del usuario en Firestore:", err);
@@ -346,6 +373,28 @@ export default function App() {
   // --- Ambient Sound Synthesis Engine using Web Audio API ---
   const startAmbientSound = (soundName: string) => {
     try {
+      // 1. Stop any previous custom audio playing immediately
+      if (customAudioRef.current) {
+        customAudioRef.current.pause();
+        customAudioRef.current = null;
+      }
+
+      // Check if this is a custom sound
+      const customSound = customSounds.find(s => s.name === soundName);
+      if (customSound) {
+        // Play custom HTML5 Audio
+        const audio = new Audio(customSound.url);
+        audio.loop = true;
+        audio.volume = 0.5; // Buen volumen por defecto
+        audio.play().catch(err => {
+          console.warn("Could not play custom audio file/stream:", err);
+          showToast("No se pudo reproducir este archivo de audio. Verifica el enlace o archivo.", "error");
+        });
+        customAudioRef.current = audio;
+        activeSoundRef.current = soundName;
+        return;
+      }
+
       // Initialize AudioContext
       if (!audioCtxRef.current) {
         audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -576,6 +625,11 @@ export default function App() {
 
   const stopAmbientSound = () => {
     try {
+      // Detener audio personalizado si está reproduciéndose
+      if (customAudioRef.current) {
+        customAudioRef.current.pause();
+        customAudioRef.current = null;
+      }
       if (masterGainRef.current && audioCtxRef.current) {
         masterGainRef.current.gain.setValueAtTime(masterGainRef.current.gain.value, audioCtxRef.current.currentTime);
         masterGainRef.current.gain.linearRampToValueAtTime(0, audioCtxRef.current.currentTime + 0.4);
@@ -606,7 +660,7 @@ export default function App() {
     return () => {
       stopAmbientSound();
     };
-  }, [isActive, activeSound, isBreak]);
+  }, [isActive, activeSound, isBreak, customSounds]);
 
   // Actualizar tiempo del temporizador cuando cambie la config
   useEffect(() => {
@@ -877,6 +931,47 @@ export default function App() {
     }
   };
 
+  // Agregar Sonido o Música Personalizados
+  const handleAddCustomSound = async () => {
+    if (!newSoundName.trim() || !newSoundUrl.trim()) {
+      showToast("Por favor ingresa un nombre y el enlace o archivo de audio.", "error");
+      return;
+    }
+    const activeUid = currentUserId || auth.currentUser?.uid;
+    if (!activeUid) {
+      showToast("Inicia sesión para agregar sonidos.", "error");
+      return;
+    }
+
+    const newSoundItem: CustomSound = {
+      id: Math.random().toString(36).substring(2, 9),
+      name: newSoundName.trim(),
+      url: newSoundUrl.trim()
+    };
+
+    // Validar nombre duplicado
+    if (['Lluvia', 'Café', 'Bosque', 'Ruido Blanco'].includes(newSoundItem.name) || customSounds.some(s => s.name === newSoundItem.name)) {
+      showToast("Ya existe un sonido con ese nombre.", "error");
+      return;
+    }
+
+    const updatedList = [...customSounds, newSoundItem];
+    setCustomSounds(updatedList);
+    
+    try {
+      await updateDoc(doc(db, 'users', activeUid), {
+        customSounds: updatedList
+      });
+      showToast("¡Sonido agregado con éxito!", "success");
+      setNewSoundName('');
+      setNewSoundUrl('');
+      setShowAddSoundForm(false);
+    } catch (err: any) {
+      console.error(err);
+      showToast(`No se pudo guardar el sonido: ${err.message || err}`, "error");
+    }
+  };
+
   // --- Handlers de Autenticación de Firebase Genuina ---
   
   const handleEmailSignUp = async (e: FormEvent) => {
@@ -888,8 +983,33 @@ export default function App() {
     setAuthLoading(true);
     setAuthError(null);
     try {
-      await createUserWithEmailAndPassword(auth, emailInput, passwordInput);
-      // El observer onAuthStateChanged manejará el registro del documento del perfil.
+      const userCredential = await createUserWithEmailAndPassword(auth, emailInput, passwordInput);
+      const firebaseUser = userCredential.user;
+      
+      // Update Firebase Auth display name so displayName stays persisted
+      await updateProfile(firebaseUser, { displayName: nameInput.trim() });
+      
+      // Create user document in Firestore immediately
+      const userDocRef = doc(db, 'users', firebaseUser.uid);
+      await setDoc(userDocRef, {
+        name: nameInput.trim(),
+        email: firebaseUser.email || '',
+        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
+        joinDate: new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long' }),
+        focusTime: 25,
+        shortBreak: 5,
+        longBreak: 15,
+        sessionsCompleted: 0,
+        activeSound: 'Lluvia',
+        currentStreak: 0,
+        bestStreak: 0,
+        lastActiveDate: '',
+        weekCommencedDate: '',
+        weeklyMinutes: [0, 0, 0, 0, 0, 0, 0],
+        customSounds: []
+      });
+      
+      showToast('¡Cuenta creada con éxito!', 'success');
     } catch (error: any) {
       console.error(error);
       if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/configuration-not-found') {
@@ -931,7 +1051,31 @@ export default function App() {
     setAuthError(null);
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      const userCredential = await signInWithPopup(auth, provider);
+      const firebaseUser = userCredential.user;
+      
+      // Check if user document already exists in Firestore, if not create it
+      const userDocRef = doc(db, 'users', firebaseUser.uid);
+      const docSnap = await getDoc(userDocRef);
+      if (!docSnap.exists()) {
+        await setDoc(userDocRef, {
+          name: firebaseUser.displayName || 'Estudiante Zen',
+          email: firebaseUser.email || '',
+          avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
+          joinDate: new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long' }),
+          focusTime: 25,
+          shortBreak: 5,
+          longBreak: 15,
+          sessionsCompleted: 0,
+          activeSound: 'Lluvia',
+          currentStreak: 0,
+          bestStreak: 0,
+          lastActiveDate: '',
+          weekCommencedDate: '',
+          weeklyMinutes: [0, 0, 0, 0, 0, 0, 0],
+          customSounds: []
+        });
+      }
     } catch (error: any) {
       console.error(error);
       setAuthError(error.message || "Error al iniciar sesión con Google.");
@@ -1622,40 +1766,219 @@ export default function App() {
                     initial={{ opacity: 0, x: 10 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -10 }}
-                    className="space-y-6"
+                    className="space-y-6 max-h-[70vh] overflow-y-auto pb-12 pr-1 scrollbar-thin"
                   >
                     <button onClick={() => setActiveSubScreen('none')} className="flex items-center gap-2 text-on-surface-variant hover:text-primary-container transition-colors cursor-pointer">
                       <ChevronRight className="w-5 h-5 rotate-180" />
                       <span>Volver al perfil</span>
                     </button>
                     <h3 className="text-2xl font-bold">Biblioteca de Sonidos</h3>
-                    <div className="grid grid-cols-1 gap-3">
-                      {[
-                        { name: 'Lluvia', icon: CloudRain, color: '#88ceff', desc: 'Gotas rítmicas para calmar la mente.' },
-                        { name: 'Café', icon: Coffee, color: '#c69c6d', desc: 'Escritura y ambiente de cafetería urbana.' },
-                        { name: 'Bosque', icon: Sparkles, color: '#a8e6cf', desc: 'Viento suave y fauna minimalista.' },
-                        { name: 'Ruido Blanco', icon: RefreshCw, color: '#ffffff', desc: 'Frecuencia constante para bloqueo total.' }
-                      ].map((sound) => (
-                        <div 
-                          key={sound.name}
-                          onClick={() => selectSound(sound.name)}
-                          className={`glass p-5 rounded-3xl flex items-center justify-between cursor-pointer transition-all active:scale-[0.98] ${activeSound === sound.name ? 'border-primary-container bg-white/10' : 'hover:bg-white/5'}`}
-                        >
-                          <div className="flex items-center gap-4">
-                            <div 
-                              className="w-12 h-12 rounded-2xl flex items-center justify-center"
-                              style={{ backgroundColor: `${sound.color}15`, color: sound.color }}
-                            >
-                              <sound.icon className="w-6 h-6" />
+                    
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-bold opacity-60 px-1">Atmósferas Incorporadas</h4>
+                      <div className="grid grid-cols-1 gap-3">
+                        {[
+                          { name: 'Lluvia', icon: CloudRain, color: '#88ceff', desc: 'Gotas rítmicas para calmar la mente.' },
+                          { name: 'Café', icon: Coffee, color: '#c69c6d', desc: 'Escritura y ambiente de cafetería urbana.' },
+                          { name: 'Bosque', icon: Sparkles, color: '#a8e6cf', desc: 'Viento suave y fauna minimalista.' },
+                          { name: 'Ruido Blanco', icon: RefreshCw, color: '#ffffff', desc: 'Frecuencia constante para bloqueo total.' }
+                        ].map((sound) => (
+                          <div 
+                            key={sound.name}
+                            onClick={() => selectSound(sound.name)}
+                            className={`glass p-5 rounded-3xl flex items-center justify-between cursor-pointer transition-all active:scale-[0.98] ${activeSound === sound.name ? 'border-primary-container bg-white/10' : 'hover:bg-white/5'}`}
+                          >
+                            <div className="flex items-center gap-4">
+                              <div 
+                                className="w-12 h-12 rounded-2xl flex items-center justify-center"
+                                style={{ backgroundColor: `${sound.color}15`, color: sound.color }}
+                              >
+                                <sound.icon className="w-6 h-6" />
+                              </div>
+                              <div>
+                                <p className="font-bold">{sound.name}</p>
+                                <p className="text-[10px] opacity-50">{sound.desc}</p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="font-bold">{sound.name}</p>
-                              <p className="text-[10px] opacity-50">{sound.desc}</p>
-                            </div>
+                            {activeSound === sound.name && <CheckCircle2 className="w-5 h-5 text-primary-container" />}
                           </div>
-                          {activeSound === sound.name && <CheckCircle2 className="w-5 h-5 text-primary-container" />}
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Sonidos Personalizados */}
+                    <div className="space-y-3 mt-6">
+                      <h4 className="text-sm font-bold opacity-60 px-1">Tus Sonidos y Música</h4>
+                      {customSounds.length === 0 ? (
+                        <p className="text-xs text-on-surface-variant italic px-1">No tienes sonidos personalizados agregados aún.</p>
+                      ) : (
+                        <div className="grid grid-cols-1 gap-3">
+                          {customSounds.map((sound) => (
+                            <div 
+                              key={sound.id}
+                              onClick={() => selectSound(sound.name)}
+                              className={`glass p-5 rounded-3xl flex items-center justify-between cursor-pointer transition-all active:scale-[0.98] ${activeSound === sound.name ? 'border-primary-container bg-white/10' : 'hover:bg-white/5'}`}
+                            >
+                              <div className="flex items-center gap-4 min-w-0">
+                                <div 
+                                  className="w-12 h-12 rounded-2xl flex items-center justify-center bg-primary-container/10 text-primary-container shrink-0"
+                                >
+                                  <Music className="w-6 h-6" />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="font-bold truncate">{sound.name}</p>
+                                  <p className="text-[10px] opacity-50 truncate">
+                                    {sound.url.startsWith('data:') ? 'Archivo de audio local' : sound.url}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {activeSound === sound.name && <CheckCircle2 className="w-5 h-5 text-primary-container" />}
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (activeSound === sound.name) {
+                                      stopAmbientSound();
+                                      setActiveSound('Lluvia');
+                                      if (currentUserId) {
+                                        await updateDoc(doc(db, 'users', currentUserId), { activeSound: 'Lluvia' });
+                                      }
+                                    }
+                                    const updatedList = customSounds.filter(s => s.id !== sound.id);
+                                    setCustomSounds(updatedList);
+                                    if (currentUserId) {
+                                      try {
+                                        await updateDoc(doc(db, 'users', currentUserId), {
+                                          customSounds: updatedList
+                                        });
+                                        showToast("Sonido eliminado de tu biblioteca.", "success");
+                                      } catch (err) {
+                                        showToast("No se pudo eliminar el sonido de la nube.", "error");
+                                      }
+                                    }
+                                  }}
+                                  className="p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer"
+                                  title="Eliminar sonido"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      )}
+                    </div>
+
+                    {/* Formulario / Botón para Agregar Sonidos */}
+                    <div className="mt-6">
+                      {!showAddSoundForm ? (
+                        <button 
+                          onClick={() => setShowAddSoundForm(true)}
+                          className="w-full py-4 border border-dashed border-white/20 rounded-2xl flex items-center justify-center gap-2 hover:bg-white/5 active:scale-95 transition-all text-sm font-bold tracking-wider text-primary-container cursor-pointer"
+                        >
+                          <Plus className="w-5 h-5" />
+                          AGREGAR SONIDO O MÚSICA
+                        </button>
+                      ) : (
+                        <div className="glass p-5 rounded-3xl space-y-4">
+                          <h4 className="font-bold text-sm">Nuevo Sonido o Música</h4>
+                          
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold uppercase tracking-widest opacity-50">Nombre del Sonido</label>
+                            <input 
+                              type="text"
+                              value={newSoundName}
+                              onChange={(e) => setNewSoundName(e.target.value)}
+                              placeholder="Ej. Lofi Chill, Ruido Mar, Clásica..."
+                              className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none text-white text-sm"
+                            />
+                          </div>
+
+                          <div className="flex gap-2 p-1 bg-white/5 rounded-xl text-xs">
+                            <button
+                              type="button"
+                              onClick={() => { setNewSoundType('url'); setNewSoundUrl(''); }}
+                              className={`flex-1 py-2 rounded-lg font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${newSoundType === 'url' ? 'bg-primary-container text-slate-900' : 'opacity-60 hover:opacity-100'}`}
+                            >
+                              <Link className="w-3.5 h-3.5" />
+                              Por Enlace URL
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setNewSoundType('upload'); setNewSoundUrl(''); }}
+                              className={`flex-1 py-2 rounded-lg font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${newSoundType === 'upload' ? 'bg-primary-container text-slate-900' : 'opacity-60 hover:opacity-100'}`}
+                            >
+                              <Upload className="w-3.5 h-3.5" />
+                              Subir Archivo
+                            </button>
+                          </div>
+
+                          {newSoundType === 'url' ? (
+                            <div className="space-y-2">
+                              <label className="text-xs font-bold uppercase tracking-widest opacity-50">Enlace de Audio (URL)</label>
+                              <input 
+                                type="text"
+                                value={newSoundUrl}
+                                onChange={(e) => setNewSoundUrl(e.target.value)}
+                                placeholder="https://ejemplo.com/audio.mp3"
+                                className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none text-white text-sm"
+                              />
+                              <p className="text-[10px] opacity-40">Introduce un enlace directo de streaming, lo-fi radio o archivo mp3 de la web.</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <label className="text-xs font-bold uppercase tracking-widest opacity-50">Seleccionar Archivo de Audio</label>
+                              <div className="relative w-full h-24 border border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center gap-1 hover:bg-white/5 transition-colors cursor-pointer overflow-hidden">
+                                <Upload className="w-6 h-6 opacity-60" />
+                                <span className="text-xs font-medium opacity-60">Subir loop (máx. 800KB, mp3/wav/ogg)</span>
+                                <input 
+                                  type="file" 
+                                  accept="audio/*"
+                                  className="absolute inset-0 opacity-0 cursor-pointer"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      if (file.size > 800 * 1024) {
+                                        showToast("El archivo excede los 800KB para almacenamiento en nube. Prefiere usar enlaces URL.", "error");
+                                        return;
+                                      }
+                                      const reader = new FileReader();
+                                      reader.onload = () => {
+                                        if (typeof reader.result === 'string') {
+                                          setNewSoundUrl(reader.result);
+                                          showToast("¡Archivo cargado con éxito!", "success");
+                                        }
+                                      };
+                                      reader.readAsDataURL(file);
+                                    }
+                                  }}
+                                />
+                                {newSoundUrl.startsWith('data:') && (
+                                  <div className="absolute inset-0 bg-primary-container text-slate-900 flex flex-col items-center justify-center text-xs font-bold">
+                                    <CheckCircle2 className="w-6 h-6 text-slate-900 mb-1" />
+                                    ¡Archivo de loop cargado y listo!
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex gap-2 pt-2">
+                            <button 
+                              onClick={() => setShowAddSoundForm(false)}
+                              className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl transition-all cursor-pointer text-xs uppercase"
+                            >
+                              Cancelar
+                            </button>
+                            <button 
+                              onClick={handleAddCustomSound}
+                              className="flex-1 py-3 bg-primary-container text-slate-900 font-bold rounded-xl active:scale-95 transition-all cursor-pointer text-xs uppercase"
+                            >
+                              Guardar Sonido
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 )}
