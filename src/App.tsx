@@ -228,11 +228,12 @@ export default function App() {
 
   // Escribir un perfil predeterminado o leerlo al iniciar sesión
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true);
       setAuthError(null);
       if (firebaseUser) {
-        setCurrentUserId(firebaseUser.uid);
+        const uid = firebaseUser.uid;
+        setCurrentUserId(uid);
         setAuthMode('loggedIn');
         
         // Pre-populamos de inmediato para evitar que "Cargando..." parpadee o se quede pegado, pero sin sobreescribir datos ya leídos de base de datos
@@ -240,7 +241,7 @@ export default function App() {
           if (prev.name !== 'Cargando...' && prev.name !== 'Estudiante Zen') {
             return prev;
           }
-          const tempName = firebaseUser.displayName || nameInput || 'Estudiante Zen';
+          const tempName = firebaseUser.displayName || 'Estudiante Zen';
           return {
             ...prev,
             name: tempName,
@@ -249,6 +250,34 @@ export default function App() {
             joinDate: prev.joinDate !== 'Uniendo...' ? prev.joinDate : new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long' })
           };
         });
+
+        // Asegurarse de que el documento del usuario exista de forma segura en Firestore
+        // (Solo lo creamos una vez si getDoc indica que no existe)
+        try {
+          const userDocRef = doc(db, 'users', uid);
+          const docSnap = await getDoc(userDocRef);
+          if (!docSnap.exists()) {
+            await setDoc(userDocRef, {
+              name: firebaseUser.displayName || 'Estudiante Zen',
+              email: firebaseUser.email || '',
+              avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
+              joinDate: new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long' }),
+              focusTime: 25,
+              shortBreak: 5,
+              longBreak: 15,
+              sessionsCompleted: 0,
+              activeSound: 'Lluvia',
+              currentStreak: 0,
+              bestStreak: 0,
+              lastActiveDate: '',
+              weekCommencedDate: '',
+              weeklyMinutes: [0, 0, 0, 0, 0, 0, 0],
+              customSounds: []
+            });
+          }
+        } catch (err) {
+          console.error("Error al asegurar inicialización del usuario en Firestore:", err);
+        }
       } else {
         setCurrentUserId(null);
         setAuthMode('login');
@@ -263,14 +292,14 @@ export default function App() {
       setLoading(false);
     });
     return () => unsubscribe();
-  }, [nameInput]);
+  }, []);
 
   // Sincronizar el perfil de usuario en tiempo real desde Firestore
   useEffect(() => {
     if (!currentUserId) return;
     
     const userDocRef = doc(db, 'users', currentUserId);
-    const unsubscribe = onSnapshot(userDocRef, async (docSnap) => {
+    const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setUser({
@@ -305,36 +334,6 @@ export default function App() {
           setCustomSounds(data.customSounds);
         } else {
           setCustomSounds([]);
-        }
-      } else {
-        // Generar valores iniciales para un nuevo usuario
-        const firebaseUser = auth.currentUser;
-        if (firebaseUser) {
-          const initialProfile: UserProfile = {
-            name: firebaseUser.displayName || nameInput || 'Estudiante Zen',
-            email: firebaseUser.email || '',
-            avatar: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
-            joinDate: new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long' })
-          };
-          
-          try {
-            await setDoc(userDocRef, {
-              ...initialProfile,
-              focusTime: 25,
-              shortBreak: 5,
-              longBreak: 15,
-              sessionsCompleted: 0,
-              activeSound: 'Lluvia',
-              currentStreak: 0,
-              bestStreak: 0,
-              lastActiveDate: '',
-              weekCommencedDate: '',
-              weeklyMinutes: [0, 0, 0, 0, 0, 0, 0],
-              customSounds: []
-            });
-          } catch (err) {
-            console.error("Error al inicializar perfil del usuario en Firestore:", err);
-          }
         }
       }
     }, (err) => {
@@ -872,11 +871,15 @@ export default function App() {
       showToast("No se detectó un usuario autenticado legítimo.", "error");
       return;
     }
+    const trimmedName = newName.trim();
     try {
       await updateDoc(doc(db, 'users', activeUid), {
-        name: newName
+        name: trimmedName
       });
-      setUser(prev => ({ ...prev, name: newName }));
+      if (auth.currentUser) {
+        await updateProfile(auth.currentUser, { displayName: trimmedName });
+      }
+      setUser(prev => ({ ...prev, name: trimmedName }));
       showToast('¡Perfil actualizado correctamente!', 'success');
       setActiveSubScreen('none');
     } catch (err: any) {
@@ -889,11 +892,15 @@ export default function App() {
   const saveProfileNameDirectly = async (newName: string) => {
     const activeUid = currentUserId || auth.currentUser?.uid;
     if (!activeUid || !newName.trim()) return;
+    const trimmedName = newName.trim();
     try {
-      setUser(prev => ({ ...prev, name: newName.trim() }));
+      setUser(prev => ({ ...prev, name: trimmedName }));
       await updateDoc(doc(db, 'users', activeUid), {
-        name: newName.trim()
+        name: trimmedName
       });
+      if (auth.currentUser) {
+        await updateProfile(auth.currentUser, { displayName: trimmedName });
+      }
       showToast('Nombre actualizado correctamente', 'success');
     } catch (err: any) {
       console.error("Error al guardar nombre directamente:", err);
