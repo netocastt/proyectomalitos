@@ -43,7 +43,8 @@ service cloud.firestore {
         && (data.bestStreak == null || data.bestStreak is int || data.bestStreak is float)
         && (data.lastActiveDate == null || (data.lastActiveDate is string && data.lastActiveDate.size() <= 50))
         && (data.weekCommencedDate == null || (data.weekCommencedDate is string && data.weekCommencedDate.size() <= 50))
-        && (data.weeklyMinutes == null || data.weeklyMinutes is list);
+        && (data.weeklyMinutes == null || data.weeklyMinutes is list)
+        && (data.customSounds == null || data.customSounds is list);
     }
     
     function isValidTask(data, userId) {
