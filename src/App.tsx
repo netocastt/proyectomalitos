@@ -32,7 +32,9 @@ import {
   Music,
   Trash2,
   Link,
-  Upload
+  Upload,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -64,6 +66,66 @@ import {
   query
 } from 'firebase/firestore';
 
+// --- IndexedDB Helper for storing large local audio files (up to 15MB or more) ---
+const DB_NAME = 'studyzen_audio_db';
+const STORE_NAME = 'sounds';
+
+function openAudioDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveLocalAudio(id: string, blob: Blob): Promise<void> {
+  const db = await openAudioDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.put(blob, id);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function getLocalAudio(id: string): Promise<Blob | null> {
+  try {
+    const db = await openAudioDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.get(id);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.error("Failed to retrieve local audio from IndexedDB:", err);
+    return null;
+  }
+}
+
+async function deleteLocalAudio(id: string): Promise<void> {
+  try {
+    const db = await openAudioDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.delete(id);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.error("Failed to delete local audio from IndexedDB:", err);
+  }
+}
+
 // --- Tipos ---
 
 type Tab = 'focus' | 'plan' | 'stats' | 'profile';
@@ -90,6 +152,7 @@ interface CustomSound {
   id: string;
   name: string;
   url: string;
+  isLocal?: boolean;
 }
 
 interface SessionConfig {
@@ -104,17 +167,44 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('focus');
   const [activeSubScreen, setActiveSubScreen] = useState<SubScreen>('none');
   
+  // Sidebar and task control
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [taskProgress, setTaskProgress] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('studyzen_task_progress');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [isAmbientSoundPlaying, setIsAmbientSoundPlaying] = useState(false);
+  
   // Sonidos Personalizados del Usuario
   const [customSounds, setCustomSounds] = useState<CustomSound[]>([]);
   const customAudioRef = useRef<HTMLAudioElement | null>(null);
+  const customAudioUrlRef = useRef<string | null>(null);
+  const localSoundIdRef = useRef<string | null>(null);
   
   // Datos del Usuario
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [user, setUser] = useState<UserProfile>({
-    name: 'Cargando...',
-    email: '',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
-    joinDate: 'Uniendo...'
+  const [user, setUser] = useState<UserProfile>(() => {
+    try {
+      const saved = localStorage.getItem('studyzen_cached_user');
+      return saved ? JSON.parse(saved) : {
+        name: 'Estudiante Zen',
+        email: '',
+        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
+        joinDate: 'Estudiante Zen'
+      };
+    } catch {
+      return {
+        name: 'Estudiante Zen',
+        email: '',
+        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
+        joinDate: 'Estudiante Zen'
+      };
+    }
   });
 
   const [sessionConfig, setSessionConfig] = useState<SessionConfig>({
@@ -369,6 +459,62 @@ export default function App() {
     return () => unsubscribe();
   }, [currentUserId]);
 
+  // Hidratar estados desde localStorage cuando currentUserId cambie para carga instantánea
+  useEffect(() => {
+    if (!currentUserId) return;
+    try {
+      const u = localStorage.getItem(`studyzen_user_${currentUserId}`);
+      if (u) setUser(JSON.parse(u));
+      
+      const c = localStorage.getItem(`studyzen_config_${currentUserId}`);
+      if (c) setSessionConfig(JSON.parse(c));
+      
+      const s = localStorage.getItem(`studyzen_sessionsCompleted_${currentUserId}`);
+      if (s) setSessionsCompleted(Number(s));
+      
+      const cs = localStorage.getItem(`studyzen_currentStreak_${currentUserId}`);
+      if (cs) setCurrentStreak(Number(cs));
+      
+      const bs = localStorage.getItem(`studyzen_bestStreak_${currentUserId}`);
+      if (bs) setBestStreak(Number(bs));
+      
+      const wm = localStorage.getItem(`studyzen_weeklyMinutes_${currentUserId}`);
+      if (wm) setWeeklyMinutes(JSON.parse(wm));
+      
+      const la = localStorage.getItem(`studyzen_lastActiveDate_${currentUserId}`);
+      if (la) setLastActiveDate(la);
+      
+      const wc = localStorage.getItem(`studyzen_weekCommencedDate_${currentUserId}`);
+      if (wc) setWeekCommencedDate(wc);
+    } catch (e) {
+      console.warn("Could not hydrate from localStorage:", e);
+    }
+  }, [currentUserId]);
+
+  // Persistir cambios locales de perfil en localStorage para respaldo offline
+  useEffect(() => {
+    if (currentUserId && user && user.name !== 'Cargando...') {
+      localStorage.setItem(`studyzen_user_${currentUserId}`, JSON.stringify(user));
+      localStorage.setItem('studyzen_cached_user', JSON.stringify(user));
+    }
+  }, [user, currentUserId]);
+
+  // Persistir estadísticas y config en localStorage para respaldo offline e instantáneo
+  useEffect(() => {
+    if (!currentUserId) return;
+    try {
+      localStorage.setItem(`studyzen_config_${currentUserId}`, JSON.stringify(sessionConfig));
+      localStorage.setItem(`studyzen_sessionsCompleted_${currentUserId}`, String(sessionsCompleted));
+      localStorage.setItem(`studyzen_currentStreak_${currentUserId}`, String(currentStreak));
+      localStorage.setItem(`studyzen_bestStreak_${currentUserId}`, String(bestStreak));
+      localStorage.setItem(`studyzen_weeklyMinutes_${currentUserId}`, JSON.stringify(weeklyMinutes));
+      localStorage.setItem(`studyzen_lastActiveDate_${currentUserId}`, lastActiveDate);
+      localStorage.setItem(`studyzen_weekCommencedDate_${currentUserId}`, weekCommencedDate);
+    } catch (e) {
+      console.error("Error writing to localStorage:", e);
+    }
+  }, [sessionConfig, sessionsCompleted, currentStreak, bestStreak, weeklyMinutes, lastActiveDate, weekCommencedDate, currentUserId]);
+
   // --- Ambient Sound Synthesis Engine using Web Audio API ---
   const startAmbientSound = (soundName: string) => {
     try {
@@ -377,21 +523,52 @@ export default function App() {
         customAudioRef.current.pause();
         customAudioRef.current = null;
       }
+      if (customAudioUrlRef.current) {
+        URL.revokeObjectURL(customAudioUrlRef.current);
+        customAudioUrlRef.current = null;
+      }
 
       // Check if this is a custom sound
       const customSound = customSounds.find(s => s.name === soundName);
       if (customSound) {
-        // Play custom HTML5 Audio
-        const audio = new Audio(customSound.url);
-        audio.loop = true;
-        audio.volume = 0.5; // Buen volumen por defecto
-        audio.play().catch(err => {
-          console.warn("Could not play custom audio file/stream:", err);
-          showToast("No se pudo reproducir este archivo de audio. Verifica el enlace o archivo.", "error");
-        });
-        customAudioRef.current = audio;
-        activeSoundRef.current = soundName;
-        return;
+        if (customSound.isLocal) {
+          // Play from IndexedDB
+          getLocalAudio(customSound.id).then(blob => {
+            if (blob) {
+              const url = URL.createObjectURL(blob);
+              customAudioUrlRef.current = url;
+              const audio = new Audio(url);
+              audio.loop = true;
+              audio.volume = 0.5;
+              audio.play().catch(err => {
+                console.warn("Could not play custom audio from IndexedDB:", err);
+                showToast("No se pudo reproducir este archivo local.", "error");
+              });
+              customAudioRef.current = audio;
+              activeSoundRef.current = soundName;
+            } else {
+              showToast("Este sonido local no está disponible en este dispositivo. Vuélvelo a subir.", "error");
+              setIsAmbientSoundPlaying(false);
+            }
+          }).catch(err => {
+            console.error("IndexedDB retrieval error:", err);
+            showToast("Error al cargar el archivo de audio local.", "error");
+            setIsAmbientSoundPlaying(false);
+          });
+          return;
+        } else {
+          // Play custom HTML5 Audio (URL)
+          const audio = new Audio(customSound.url);
+          audio.loop = true;
+          audio.volume = 0.5; // Buen volumen por defecto
+          audio.play().catch(err => {
+            console.warn("Could not play custom audio file/stream:", err);
+            showToast("No se pudo reproducir este archivo de audio. Verifica el enlace o archivo.", "error");
+          });
+          customAudioRef.current = audio;
+          activeSoundRef.current = soundName;
+          return;
+        }
       }
 
       // Initialize AudioContext
@@ -629,6 +806,10 @@ export default function App() {
         customAudioRef.current.pause();
         customAudioRef.current = null;
       }
+      if (customAudioUrlRef.current) {
+        URL.revokeObjectURL(customAudioUrlRef.current);
+        customAudioUrlRef.current = null;
+      }
       if (masterGainRef.current && audioCtxRef.current) {
         masterGainRef.current.gain.setValueAtTime(masterGainRef.current.gain.value, audioCtxRef.current.currentTime);
         masterGainRef.current.gain.linearRampToValueAtTime(0, audioCtxRef.current.currentTime + 0.4);
@@ -649,9 +830,9 @@ export default function App() {
     }
   };
 
-  // Sound selection hook listening to study/break states
+  // Sound selection hook listening to study/break states and isAmbientSoundPlaying state
   useEffect(() => {
-    if (isActive && !isBreak) {
+    if (isAmbientSoundPlaying) {
       startAmbientSound(activeSound);
     } else {
       stopAmbientSound();
@@ -659,14 +840,14 @@ export default function App() {
     return () => {
       stopAmbientSound();
     };
-  }, [isActive, activeSound, isBreak, customSounds]);
+  }, [isAmbientSoundPlaying, activeSound, customSounds]);
 
-  // Actualizar tiempo del temporizador cuando cambie la config
+  // Actualizar tiempo del temporizador cuando cambie la config y el temporizador no esté corriendo
   useEffect(() => {
     if (!isActive) {
       setTimeLeft(isBreak ? sessionConfig.shortBreak * 60 : sessionConfig.focusTime * 60);
     }
-  }, [sessionConfig, isBreak, isActive]);
+  }, [sessionConfig.shortBreak, sessionConfig.focusTime, isBreak]);
 
   // --- Lógica del Temporizador ---
   useEffect(() => {
@@ -753,6 +934,7 @@ export default function App() {
 
   const handleTimerComplete = async () => {
     setIsActive(false);
+    setIsAmbientSoundPlaying(false);
     if (!isBreak) {
       const nextSessions = sessionsCompleted + 1;
       setSessionsCompleted(nextSessions);
@@ -760,7 +942,35 @@ export default function App() {
       // Persistir incremento de sesiones y estadísticas en Firestore
       await trackSessionCompletion(nextSessions);
       
-      showToast('¡Sesión terminada! Tómate un descanso.', 'success');
+      // Registrar automáticamente en la tarea seleccionada si existe
+      if (activeTaskId) {
+        const targetTask = tasks.find(t => t.id === activeTaskId);
+        if (targetTask) {
+          const currentProgress = taskProgress[activeTaskId] || 0;
+          const nextTaskProgress = currentProgress + 1;
+          const updatedProgress = { ...taskProgress, [activeTaskId]: nextTaskProgress };
+          setTaskProgress(updatedProgress);
+          localStorage.setItem('studyzen_task_progress', JSON.stringify(updatedProgress));
+
+          if (nextTaskProgress >= targetTask.sessions) {
+            try {
+              const taskDocRef = doc(db, 'users', currentUserId!, 'tasks', activeTaskId);
+              await updateDoc(taskDocRef, {
+                completed: true
+              });
+              showToast(`¡Excelente! Completaste todas las sesiones de: ${targetTask.title}`, 'success');
+              setActiveTaskId(null);
+            } catch (err) {
+              console.error("Error al completar tarea automáticamente:", err);
+            }
+          } else {
+            showToast(`¡Sesión de ${targetTask.title} registrada! (${nextTaskProgress}/${targetTask.sessions})`, 'success');
+          }
+        }
+      } else {
+        showToast('¡Sesión terminada! Tómate un descanso.', 'success');
+      }
+
       const nextBreak = nextSessions % 4 === 0 ? sessionConfig.longBreak : sessionConfig.shortBreak;
       setTimeLeft(nextBreak * 60);
       setIsBreak(true);
@@ -771,9 +981,19 @@ export default function App() {
     }
   };
 
-  const toggleTimer = () => setIsActive(!isActive);
+  const toggleTimer = () => {
+    const nextActive = !isActive;
+    setIsActive(nextActive);
+    if (nextActive && !isBreak) {
+      setIsAmbientSoundPlaying(true);
+    } else {
+      setIsAmbientSoundPlaying(false);
+    }
+  };
+
   const resetTimer = () => {
     setIsActive(false);
+    setIsAmbientSoundPlaying(false);
     setTimeLeft(isBreak ? sessionConfig.shortBreak * 60 : sessionConfig.focusTime * 60);
   };
 
@@ -950,10 +1170,16 @@ export default function App() {
       return;
     }
 
+    const isLocal = newSoundUrl.startsWith('local://');
+    const soundId = isLocal && localSoundIdRef.current 
+      ? localSoundIdRef.current 
+      : Math.random().toString(36).substring(2, 9);
+
     const newSoundItem: CustomSound = {
-      id: Math.random().toString(36).substring(2, 9),
+      id: soundId,
       name: newSoundName.trim(),
-      url: newSoundUrl.trim()
+      url: newSoundUrl.trim(),
+      isLocal: isLocal
     };
 
     // Validar nombre duplicado
@@ -972,6 +1198,7 @@ export default function App() {
       showToast("¡Sonido agregado con éxito!", "success");
       setNewSoundName('');
       setNewSoundUrl('');
+      localSoundIdRef.current = null;
       setShowAddSoundForm(false);
     } catch (err: any) {
       console.error(err);
@@ -1218,10 +1445,124 @@ export default function App() {
 
   return (
     <div className="flex flex-col min-h-screen">
+      {/* Sidebar Drawer */}
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <>
+            {/* Backdrop Overlay */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsSidebarOpen(false)}
+              className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100]"
+            />
+            {/* Sidebar Panel */}
+            <motion.div
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed left-0 top-0 bottom-0 w-80 bg-slate-950 border-r border-white/10 z-[101] flex flex-col p-6 shadow-2xl"
+            >
+              {/* Header inside Sidebar */}
+              <div className="flex justify-between items-center mb-8 border-b border-white/10 pb-4">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-primary-container animate-pulse" />
+                  <span className="font-sans font-bold text-xl tracking-tight text-white">StudyZen</span>
+                </div>
+                <button 
+                  onClick={() => setIsSidebarOpen(false)}
+                  className="p-1.5 hover:bg-white/10 text-on-surface-variant hover:text-white rounded-lg transition-colors cursor-pointer"
+                >
+                  <ChevronRight className="w-5 h-5 rotate-180" />
+                </button>
+              </div>
+
+              {/* User Quick Info */}
+              <div className="glass p-4 rounded-2xl mb-6 flex items-center gap-3">
+                <img src={user.avatar} className="w-10 h-10 rounded-full border border-primary-container/30 object-cover" />
+                <div className="min-w-0">
+                  <p className="font-bold text-sm text-white truncate">{user.name}</p>
+                  <p className="text-[10px] uppercase tracking-wider text-primary-container font-semibold">
+                    Racha: {currentStreak} 🔥 | {sessionsCompleted} ses.
+                  </p>
+                </div>
+              </div>
+
+              {/* Navigation Links */}
+              <div className="space-y-1 flex-1">
+                <p className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant opacity-50 mb-2 px-3">Menú Principal</p>
+                {[
+                  { id: 'focus', icon: Timer, label: 'Temporizador' },
+                  { id: 'plan', icon: Calendar, label: 'Planificador' },
+                  { id: 'stats', icon: BarChart2, label: 'Estadísticas' },
+                  { id: 'profile', icon: User, label: 'Ajustes' }
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveTab(item.id as Tab);
+                      setActiveSubScreen('none');
+                      setIsSidebarOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all text-left cursor-pointer ${activeTab === item.id ? 'bg-primary-container text-slate-900 shadow-[0_0_15px_rgba(168,230,207,0.3)]' : 'text-on-surface-variant hover:bg-white/5 hover:text-white'}`}
+                  >
+                    <item.icon className="w-5 h-5 shrink-0" />
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+
+                <p className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant opacity-50 mt-6 mb-2 px-3">Control de Audio</p>
+                <div className="glass p-3 rounded-xl space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-white/70 font-semibold truncate">Sonido: {activeSound}</span>
+                    <button 
+                      onClick={() => setIsAmbientSoundPlaying(!isAmbientSoundPlaying)}
+                      className={`p-1.5 rounded-lg border transition-all cursor-pointer ${isAmbientSoundPlaying ? 'border-primary-container/30 text-primary-container bg-primary-container/10' : 'border-white/10 text-on-surface-variant'}`}
+                    >
+                      {isAmbientSoundPlaying ? <Volume2 className="w-4 h-4 animate-bounce" /> : <VolumeX className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {['Lluvia', 'Café', 'Bosque', 'Ruido Blanco'].map(soundName => (
+                      <button
+                        key={soundName}
+                        onClick={() => selectSound(soundName)}
+                        className={`text-[10px] py-1.5 rounded-lg border font-semibold transition-all cursor-pointer ${activeSound === soundName ? 'border-primary-container text-primary-container bg-primary-container/5' : 'border-white/5 text-white/40 hover:border-white/10'}`}
+                      >
+                        {soundName}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Logout Button inside Sidebar Footer */}
+              <div className="border-t border-white/10 pt-4">
+                <button
+                  onClick={() => {
+                    setIsSidebarOpen(false);
+                    handleLogout();
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-red-500/10 text-red-400 hover:text-red-300 transition-colors font-bold text-sm cursor-pointer"
+                >
+                  <LogOut className="w-5 h-5 shrink-0" />
+                  <span>Cerrar Sesión</span>
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Top Bar */}
       <header className="fixed top-0 w-full z-50 glass border-b border-white/10 px-6 py-4 flex justify-between items-center bg-slate-950/40 backdrop-blur-xl">
         <div className="flex items-center gap-3">
-          <button className="p-2 text-primary-container hover:bg-white/10 rounded-lg transition-colors">
+          <button 
+            onClick={() => setIsSidebarOpen(true)}
+            className="p-2 text-primary-container hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
+          >
             <Menu className="w-6 h-6" />
           </button>
           <h1 className="text-xl font-bold tracking-tight text-primary-container drop-shadow-[0_0_10px_rgba(168,230,207,0.5)]">
@@ -1299,6 +1640,37 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Selector de Tarea Activa */}
+              <div className="w-full max-w-xs glass p-4 rounded-3xl mb-6 space-y-3">
+                <div className="flex justify-between items-center px-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-primary-container" />
+                    Trabajar en Tarea:
+                  </span>
+                  {activeTaskId && (
+                    <button 
+                      onClick={() => setActiveTaskId(null)} 
+                      className="text-[10px] uppercase tracking-widest text-red-400 hover:text-red-300 font-bold transition-colors cursor-pointer"
+                    >
+                      Quitar
+                    </button>
+                  )}
+                </div>
+                <select
+                  value={activeTaskId || ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setActiveTaskId(val ? val : null);
+                  }}
+                  className="w-full bg-slate-900/60 border border-white/10 rounded-xl p-3 outline-none text-sm text-white focus:ring-1 focus:ring-primary-container cursor-pointer [color-scheme:dark]"
+                >
+                  <option value="">Ninguna (Enfoque Libre)</option>
+                  {tasks.filter(t => !t.completed).map(t => (
+                    <option key={t.id} value={t.id}>{t.title} ({taskProgress[t.id] || 0}/{t.sessions} ses.)</option>
+                  ))}
+                </select>
+              </div>
+
               {/* Controles */}
               <div className="w-full flex flex-col gap-4">
                 <div className="flex gap-4">
@@ -1320,17 +1692,25 @@ export default function App() {
                 <div className="flex gap-3 mt-2">
                   <button 
                     onClick={() => selectSound('Lluvia')}
-                    className={`flex-1 p-4 glass rounded-2xl flex flex-col items-center gap-2 group transition-all hover:bg-white/10 active:scale-95 cursor-pointer ${activeSound === 'Lluvia' ? 'border-primary-container bg-white/5' : ''}`}
+                    className={`flex-1 p-4 glass rounded-2xl flex flex-col items-center gap-2 group transition-all hover:bg-white/10 active:scale-95 cursor-pointer ${activeSound === 'Lluvia' && isAmbientSoundPlaying ? 'border-primary-container bg-white/10' : ''}`}
                   >
-                    <CloudRain className={`w-6 h-6 ${activeSound === 'Lluvia' ? 'text-primary-container' : 'text-secondary'}`} />
+                    <CloudRain className={`w-6 h-6 ${activeSound === 'Lluvia' && isAmbientSoundPlaying ? 'text-primary-container animate-pulse' : 'text-secondary'}`} />
                     <span className="text-xs uppercase tracking-wider font-semibold opacity-60 group-hover:opacity-100 italic">Lluvia</span>
                   </button>
                   <button 
                     onClick={() => selectSound('Café')}
-                    className={`flex-1 p-4 glass rounded-2xl flex flex-col items-center gap-2 group transition-all hover:bg-white/10 active:scale-95 cursor-pointer ${activeSound === 'Café' ? 'border-primary-container bg-white/5' : ''}`}
+                    className={`flex-1 p-4 glass rounded-2xl flex flex-col items-center gap-2 group transition-all hover:bg-white/10 active:scale-95 cursor-pointer ${activeSound === 'Café' && isAmbientSoundPlaying ? 'border-primary-container bg-white/10' : ''}`}
                   >
-                    <Coffee className={`w-6 h-6 ${activeSound === 'Café' ? 'text-primary-container' : 'text-[#c69c6d]'}`} />
+                    <Coffee className={`w-6 h-6 ${activeSound === 'Café' && isAmbientSoundPlaying ? 'text-primary-container animate-pulse' : 'text-[#c69c6d]'}`} />
                     <span className="text-xs uppercase tracking-wider font-semibold opacity-60 group-hover:opacity-100 italic">Café</span>
+                  </button>
+                  <button 
+                    onClick={() => setIsAmbientSoundPlaying(!isAmbientSoundPlaying)}
+                    className={`p-4 glass rounded-2xl flex flex-col items-center justify-center gap-2 group transition-all hover:bg-white/10 active:scale-95 cursor-pointer ${isAmbientSoundPlaying ? 'border-primary-container text-primary-container bg-white/10' : 'text-on-surface-variant opacity-60'}`}
+                    title={isAmbientSoundPlaying ? 'Silenciar atmósfera' : 'Reproducir atmósfera'}
+                  >
+                    {isAmbientSoundPlaying ? <Volume2 className="w-6 h-6 animate-pulse" /> : <VolumeX className="w-6 h-6" />}
+                    <span className="text-[10px] uppercase tracking-widest font-semibold">{isAmbientSoundPlaying ? 'Suena' : 'Mudo'}</span>
                   </button>
                 </div>
               </div>
@@ -1343,12 +1723,22 @@ export default function App() {
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-widest text-on-surface-variant font-bold">Sesiones hoy</p>
-                    <p className="text-2xl font-bold">{sessionsCompleted}</p>
+                    <p className="text-2xl font-bold">
+                      {activeTaskId && tasks.find(t => t.id === activeTaskId)
+                        ? `${taskProgress[activeTaskId] || 0}/${tasks.find(t => t.id === activeTaskId)?.sessions}`
+                        : `${sessionsCompleted}/8`
+                      }
+                    </p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs uppercase tracking-widest text-on-surface-variant font-bold">Meta diaria</p>
-                  <p className="text-2xl font-bold">{sessionsCompleted}/8</p>
+                  <p className="text-xs uppercase tracking-widest text-on-surface-variant font-bold">Objetivo</p>
+                  <p className="text-sm font-bold text-primary-container truncate max-w-[150px]">
+                    {activeTaskId && tasks.find(t => t.id === activeTaskId)
+                      ? tasks.find(t => t.id === activeTaskId)?.title
+                      : '8 diarias'
+                    }
+                  </p>
                 </div>
               </div>
             </motion.div>
@@ -1835,7 +2225,7 @@ export default function App() {
                                 <div className="min-w-0">
                                   <p className="font-bold truncate">{sound.name}</p>
                                   <p className="text-[10px] opacity-50 truncate">
-                                    {sound.url.startsWith('data:') ? 'Archivo de audio local' : sound.url}
+                                    {sound.isLocal ? 'Archivo de audio local (Persistente)' : sound.url.startsWith('data:') ? 'Archivo de audio local' : sound.url}
                                   </p>
                                 </div>
                               </div>
@@ -1850,6 +2240,9 @@ export default function App() {
                                       if (currentUserId) {
                                         await updateDoc(doc(db, 'users', currentUserId), { activeSound: 'Lluvia' });
                                       }
+                                    }
+                                    if (sound.isLocal) {
+                                      await deleteLocalAudio(sound.id);
                                     }
                                     const updatedList = customSounds.filter(s => s.id !== sound.id);
                                     setCustomSounds(updatedList);
@@ -1937,33 +2330,35 @@ export default function App() {
                               <label className="text-xs font-bold uppercase tracking-widest opacity-50">Seleccionar Archivo de Audio</label>
                               <div className="relative w-full h-24 border border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center gap-1 hover:bg-white/5 transition-colors cursor-pointer overflow-hidden">
                                 <Upload className="w-6 h-6 opacity-60" />
-                                <span className="text-xs font-medium opacity-60">Subir loop (máx. 800KB, mp3/wav/ogg)</span>
+                                <span className="text-xs font-medium opacity-60">Subir loop o canción (máx. 15MB, mp3/wav/ogg)</span>
                                 <input 
                                   type="file" 
                                   accept="audio/*"
                                   className="absolute inset-0 opacity-0 cursor-pointer"
-                                  onChange={(e) => {
+                                  onChange={async (e) => {
                                     const file = e.target.files?.[0];
                                     if (file) {
-                                      if (file.size > 800 * 1024) {
-                                        showToast("El archivo excede los 800KB para almacenamiento en nube. Prefiere usar enlaces URL.", "error");
+                                      if (file.size > 15 * 1024 * 1024) {
+                                        showToast("El archivo excede los 15MB permitidos.", "error");
                                         return;
                                       }
-                                      const reader = new FileReader();
-                                      reader.onload = () => {
-                                        if (typeof reader.result === 'string') {
-                                          setNewSoundUrl(reader.result);
-                                          showToast("¡Archivo cargado con éxito!", "success");
-                                        }
-                                      };
-                                      reader.readAsDataURL(file);
+                                      const tempId = Math.random().toString(36).substring(2, 9);
+                                      try {
+                                        await saveLocalAudio(tempId, file);
+                                        setNewSoundUrl(`local://${tempId}`);
+                                        localSoundIdRef.current = tempId;
+                                        showToast("¡Archivo de audio cargado con éxito!", "success");
+                                      } catch (err) {
+                                        console.error("No se pudo guardar el audio localmente:", err);
+                                        showToast("Error al guardar el archivo de audio localmente en el dispositivo.", "error");
+                                      }
                                     }
                                   }}
                                 />
-                                {newSoundUrl.startsWith('data:') && (
+                                {newSoundUrl.startsWith('local://') && (
                                   <div className="absolute inset-0 bg-primary-container text-slate-900 flex flex-col items-center justify-center text-xs font-bold">
                                     <CheckCircle2 className="w-6 h-6 text-slate-900 mb-1" />
-                                    ¡Archivo de loop cargado y listo!
+                                    ¡Archivo de loop/canción listo localmente!
                                   </div>
                                 )}
                               </div>
