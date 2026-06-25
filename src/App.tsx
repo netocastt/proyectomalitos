@@ -181,7 +181,14 @@ export default function App() {
   const [isAmbientSoundPlaying, setIsAmbientSoundPlaying] = useState(false);
   
   // Sonidos Personalizados del Usuario
-  const [customSounds, setCustomSounds] = useState<CustomSound[]>([]);
+  const [customSounds, setCustomSounds] = useState<CustomSound[]>(() => {
+    try {
+      const saved = localStorage.getItem('studyzen_custom_sounds');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const customAudioRef = useRef<HTMLAudioElement | null>(null);
   const customAudioUrlRef = useRef<string | null>(null);
   const localSoundIdRef = useRef<string | null>(null);
@@ -207,27 +214,68 @@ export default function App() {
     }
   });
 
-  const [sessionConfig, setSessionConfig] = useState<SessionConfig>({
-    focusTime: 25,
-    shortBreak: 5,
-    longBreak: 15
+  const [sessionConfig, setSessionConfig] = useState<SessionConfig>(() => {
+    try {
+      const saved = localStorage.getItem('studyzen_session_config');
+      return saved ? JSON.parse(saved) : { focusTime: 25, shortBreak: 5, longBreak: 15 };
+    } catch {
+      return { focusTime: 25, shortBreak: 5, longBreak: 15 };
+    }
   });
 
-  const [activeSound, setActiveSound] = useState('Lluvia');
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [activeSound, setActiveSound] = useState<string>(() => {
+    return localStorage.getItem('studyzen_active_sound') || 'Lluvia';
+  });
+
+  const [tasks, setTasks] = useState<Task[]>(() => {
+    try {
+      const saved = localStorage.getItem('studyzen_tasks');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Estado del Temporizador
-  const [timeLeft, setTimeLeft] = useState(25 * 60);
+  const [timeLeft, setTimeLeft] = useState(() => {
+    try {
+      const saved = localStorage.getItem('studyzen_session_config');
+      const config = saved ? JSON.parse(saved) : { focusTime: 25 };
+      return (config.focusTime || 25) * 60;
+    } catch {
+      return 25 * 60;
+    }
+  });
   const [isActive, setIsActive] = useState(false);
   const [isBreak, setIsBreak] = useState(false);
-  const [sessionsCompleted, setSessionsCompleted] = useState(0);
+  const [sessionsCompleted, setSessionsCompleted] = useState<number>(() => {
+    const saved = localStorage.getItem('studyzen_sessions_completed');
+    return saved ? parseInt(saved, 10) : 0;
+  });
 
   // Estadísticas del usuario persistidas en firestore
-  const [currentStreak, setCurrentStreak] = useState(0);
-  const [bestStreak, setBestStreak] = useState(0);
-  const [weeklyMinutes, setWeeklyMinutes] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
-  const [lastActiveDate, setLastActiveDate] = useState('');
-  const [weekCommencedDate, setWeekCommencedDate] = useState('');
+  const [currentStreak, setCurrentStreak] = useState<number>(() => {
+    const saved = localStorage.getItem('studyzen_current_streak');
+    return saved ? parseInt(saved, 10) : 0;
+  });
+  const [bestStreak, setBestStreak] = useState<number>(() => {
+    const saved = localStorage.getItem('studyzen_best_streak');
+    return saved ? parseInt(saved, 10) : 0;
+  });
+  const [weeklyMinutes, setWeeklyMinutes] = useState<number[]>(() => {
+    try {
+      const saved = localStorage.getItem('studyzen_weekly_minutes');
+      return saved ? JSON.parse(saved) : [0, 0, 0, 0, 0, 0, 0];
+    } catch {
+      return [0, 0, 0, 0, 0, 0, 0];
+    }
+  });
+  const [lastActiveDate, setLastActiveDate] = useState<string>(() => {
+    return localStorage.getItem('studyzen_last_active_date') || '';
+  });
+  const [weekCommencedDate, setWeekCommencedDate] = useState<string>(() => {
+    return localStorage.getItem('studyzen_week_commenced_date') || '';
+  });
 
   // Ambient Sound Synthesis Engine using Web Audio API
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -392,38 +440,61 @@ export default function App() {
     const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        setUser({
+        const updatedUser = {
           name: data.name || 'Estudiante Zen',
           email: data.email || '',
           avatar: data.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
           joinDate: data.joinDate || 'Junio 2026'
-        });
+        };
+        setUser(updatedUser);
+        localStorage.setItem(`studyzen_user_${currentUserId}`, JSON.stringify(updatedUser));
         
-        setSessionConfig({
+        const updatedConfig = {
           focusTime: typeof data.focusTime === 'number' ? data.focusTime : 25,
           shortBreak: typeof data.shortBreak === 'number' ? data.shortBreak : 5,
           longBreak: typeof data.longBreak === 'number' ? data.longBreak : 15
-        });
+        };
+        setSessionConfig(updatedConfig);
+        localStorage.setItem(`studyzen_config_${currentUserId}`, JSON.stringify(updatedConfig));
         
-        if (data.activeSound) setActiveSound(data.activeSound);
+        if (data.activeSound) {
+          setActiveSound(data.activeSound);
+          localStorage.setItem(`studyzen_active_sound_${currentUserId}`, data.activeSound);
+        }
         if (typeof data.sessionsCompleted === 'number') {
           setSessionsCompleted(data.sessionsCompleted);
+          localStorage.setItem(`studyzen_sessionsCompleted_${currentUserId}`, String(data.sessionsCompleted));
         }
 
         // Cargar estadísticas sincronizadas
-        setCurrentStreak(typeof data.currentStreak === 'number' ? data.currentStreak : 0);
-        setBestStreak(typeof data.bestStreak === 'number' ? data.bestStreak : 0);
+        const currentStr = typeof data.currentStreak === 'number' ? data.currentStreak : 0;
+        setCurrentStreak(currentStr);
+        localStorage.setItem(`studyzen_currentStreak_${currentUserId}`, String(currentStr));
+
+        const bestStr = typeof data.bestStreak === 'number' ? data.bestStreak : 0;
+        setBestStreak(bestStr);
+        localStorage.setItem(`studyzen_bestStreak_${currentUserId}`, String(bestStr));
+
         setLastActiveDate(data.lastActiveDate || '');
+        localStorage.setItem(`studyzen_lastActiveDate_${currentUserId}`, data.lastActiveDate || '');
+
         setWeekCommencedDate(data.weekCommencedDate || '');
+        localStorage.setItem(`studyzen_weekCommencedDate_${currentUserId}`, data.weekCommencedDate || '');
+
         if (Array.isArray(data.weeklyMinutes) && data.weeklyMinutes.length === 7) {
           setWeeklyMinutes(data.weeklyMinutes);
+          localStorage.setItem(`studyzen_weeklyMinutes_${currentUserId}`, JSON.stringify(data.weeklyMinutes));
         } else {
           setWeeklyMinutes([0, 0, 0, 0, 0, 0, 0]);
+          localStorage.setItem(`studyzen_weeklyMinutes_${currentUserId}`, JSON.stringify([0, 0, 0, 0, 0, 0, 0]));
         }
+
         if (Array.isArray(data.customSounds)) {
           setCustomSounds(data.customSounds);
+          localStorage.setItem(`studyzen_custom_sounds_${currentUserId}`, JSON.stringify(data.customSounds));
         } else {
           setCustomSounds([]);
+          localStorage.setItem(`studyzen_custom_sounds_${currentUserId}`, JSON.stringify([]));
         }
       }
     }, (err) => {
@@ -452,6 +523,7 @@ export default function App() {
         });
       });
       setTasks(fetchedTasks);
+      localStorage.setItem(`studyzen_tasks_${currentUserId}`, JSON.stringify(fetchedTasks));
     }, (err) => {
       handleFirestoreError(err, OperationType.GET, `users/${currentUserId}/tasks`);
     });
@@ -486,6 +558,15 @@ export default function App() {
       
       const wc = localStorage.getItem(`studyzen_weekCommencedDate_${currentUserId}`);
       if (wc) setWeekCommencedDate(wc);
+
+      const snd = localStorage.getItem(`studyzen_custom_sounds_${currentUserId}`);
+      if (snd) setCustomSounds(JSON.parse(snd));
+
+      const tsk = localStorage.getItem(`studyzen_tasks_${currentUserId}`);
+      if (tsk) setTasks(JSON.parse(tsk));
+
+      const as = localStorage.getItem(`studyzen_active_sound_${currentUserId}`);
+      if (as) setActiveSound(as);
     } catch (e) {
       console.warn("Could not hydrate from localStorage:", e);
     }
@@ -639,7 +720,7 @@ export default function App() {
 
         let dropletTimer: any = null;
         const scheduleDroplet = () => {
-          if (activeSoundRef.current !== 'Lluvia' || !isActive || isBreak) return;
+          if (activeSoundRef.current !== 'Lluvia' || !isAmbientSoundPlaying) return;
           
           const dropOsc = ctx.createOscillator();
           const dropGain = ctx.createGain();
@@ -702,7 +783,7 @@ export default function App() {
 
         let birdTimer: any = null;
         const playBirdChirp = () => {
-          if (activeSoundRef.current !== 'Bosque' || !isActive || isBreak) return;
+          if (activeSoundRef.current !== 'Bosque' || !isAmbientSoundPlaying) return;
 
           const chirpOsc = ctx.createOscillator();
           const chirpGain = ctx.createGain();
@@ -754,7 +835,7 @@ export default function App() {
 
         let cafeTimer: any = null;
         const playCafeDetail = () => {
-          if (activeSoundRef.current !== 'Café' || !isActive || isBreak) return;
+          if (activeSoundRef.current !== 'Café' || !isAmbientSoundPlaying) return;
 
           const detailType = Math.random();
           if (detailType < 0.7) {
@@ -814,16 +895,19 @@ export default function App() {
         masterGainRef.current.gain.setValueAtTime(masterGainRef.current.gain.value, audioCtxRef.current.currentTime);
         masterGainRef.current.gain.linearRampToValueAtTime(0, audioCtxRef.current.currentTime + 0.4);
       }
+      
+      const nodesToStop = [...soundNodesRef.current];
+      soundNodesRef.current = [];
+      activeSoundRef.current = '';
+
       setTimeout(() => {
-        soundNodesRef.current.forEach((node) => {
+        nodesToStop.forEach((node) => {
           try {
             if (node.stop && typeof node.stop === 'function') {
               node.stop();
             }
           } catch (err) {}
         });
-        soundNodesRef.current = [];
-        activeSoundRef.current = '';
       }, 420);
     } catch (e) {
       console.warn("Could not stop audio safely:", e);
@@ -1147,13 +1231,16 @@ export default function App() {
   // Cambiar sonido ambiente
   const selectSound = async (soundName: string) => {
     setActiveSound(soundName);
-    if (currentUserId) {
+    setIsAmbientSoundPlaying(true);
+    localStorage.setItem('studyzen_active_sound', soundName);
+    const activeUid = currentUserId || auth.currentUser?.uid;
+    if (activeUid) {
       try {
-        await updateDoc(doc(db, 'users', currentUserId), {
+        await updateDoc(doc(db, 'users', activeUid), {
           activeSound: soundName
         });
       } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}`);
+        handleFirestoreError(err, OperationType.WRITE, `users/${activeUid}`);
       }
     }
   };
@@ -1190,6 +1277,7 @@ export default function App() {
 
     const updatedList = [...customSounds, newSoundItem];
     setCustomSounds(updatedList);
+    localStorage.setItem('studyzen_custom_sounds', JSON.stringify(updatedList));
     
     try {
       await updateDoc(doc(db, 'users', activeUid), {
