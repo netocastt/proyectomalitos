@@ -49,13 +49,12 @@ service cloud.firestore {
     }
     
     function isValidTask(data, userId) {
-      return data.userId == request.auth.uid && data.userId == userId
-        && data.title is string && data.title.size() <= 500
-        && data.completed is bool
-        && (data.difficulty == null || (data.difficulty is string && data.difficulty.size() <= 50))
+      return data.title is string && data.title.size() <= 1000
+        && (data.completed == null || data.completed is bool)
+        && (data.difficulty == null || data.difficulty is string)
         && (data.sessions == null || data.sessions is int || data.sessions is float)
         && (data.progress == null || data.progress is int || data.progress is float)
-        && (data.date == null || (data.date is string && data.date.size() <= 50));
+        && (data.date == null || data.date is string);
     }
     
     // Rules
