@@ -318,10 +318,17 @@ export default function App() {
   const [taskDifficultyInput, setTaskDifficultyInput] = useState<Task['difficulty']>('Media');
   const [taskSessionsInput, setTaskSessionsInput] = useState<number>(3);
 
-  // Sincronizar las sesiones propuestas basadas en la dificultad seleccionada
+  // Sincronizar las sesiones propuestas basadas en la dificultad seleccionada y el tiempo de enfoque (Pomodoro)
   useEffect(() => {
-    setTaskSessionsInput(taskDifficultyInput === 'Alta' ? 5 : taskDifficultyInput === 'Media' ? 3 : 1);
-  }, [taskDifficultyInput]);
+    const focusTime = sessionConfig?.focusTime || 25;
+    let targetMinutes = 75; // Media por defecto
+    if (taskDifficultyInput === 'Alta') {
+      targetMinutes = 125;
+    } else if (taskDifficultyInput === 'Baja') {
+      targetMinutes = 25;
+    }
+    setTaskSessionsInput(Math.max(1, Math.round(targetMinutes / focusTime)));
+  }, [taskDifficultyInput, sessionConfig?.focusTime]);
 
   // Estados para agregar sonidos o música personalizados
   const [showAddSoundForm, setShowAddSoundForm] = useState(false);
@@ -2151,59 +2158,30 @@ export default function App() {
                           <span>{task.date}</span>
                         </div>
                         
-                        <div className="flex items-center gap-2 bg-white/5 px-2.5 py-1.5 rounded-xl border border-white/5">
+                        <div className="flex items-center gap-2">
                           <Timer className="w-4 h-4 text-secondary shrink-0" />
-                          <span className="text-xs mr-1 opacity-80">Sesiones:</span>
-                          <div className="flex items-center gap-1.5">
-                            {/* Decrementar progreso */}
+                          <span>Sesiones: <strong className="text-white">{task.progress || 0}</strong>/{task.sessions}</span>
+                          
+                          <div className="flex items-center gap-1 bg-white/5 px-1 py-0.5 rounded-lg border border-white/5 ml-1">
                             <button
                               onClick={() => {
                                 const nextProgress = Math.max(0, (task.progress || 0) - 1);
                                 updateTaskProgress(task.id, nextProgress);
                               }}
                               disabled={task.progress === 0}
-                              className="w-5 h-5 rounded bg-white/10 text-white flex items-center justify-center hover:bg-white/20 disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer text-xs font-bold"
-                              title="Restar sesión completada"
+                              className="w-5 h-5 rounded bg-white/5 text-white/80 flex items-center justify-center hover:bg-white/10 disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer text-xs"
+                              title="Restar sesión"
                             >
                               -
                             </button>
-                            <span className="text-xs font-bold text-white min-w-[14px] text-center" title="Sesiones completadas">{task.progress || 0}</span>
-                            {/* Incrementar progreso */}
                             <button
                               onClick={() => {
                                 const nextProgress = Math.min(task.sessions, (task.progress || 0) + 1);
                                 updateTaskProgress(task.id, nextProgress);
                               }}
                               disabled={task.progress >= task.sessions}
-                              className="w-5 h-5 rounded bg-white/10 text-white flex items-center justify-center hover:bg-white/20 disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer text-xs font-bold"
-                              title="Sumar sesión completada"
-                            >
-                              +
-                            </button>
-                            
-                            <span className="text-white/30 text-xs mx-0.5">/</span>
-
-                            {/* Decrementar sesiones totales */}
-                            <button
-                              onClick={() => {
-                                const nextSessions = Math.max(1, task.sessions - 1);
-                                updateTaskSessions(task.id, nextSessions);
-                              }}
-                              disabled={task.sessions <= 1 || task.sessions <= (task.progress || 0)}
-                              className="w-5 h-5 rounded bg-white/10 text-white flex items-center justify-center hover:bg-white/20 disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer text-xs font-bold"
-                              title="Disminuir sesiones objetivo"
-                            >
-                              -
-                            </button>
-                            <span className="text-xs font-bold text-primary-container min-w-[14px] text-center" title="Sesiones objetivo">{task.sessions}</span>
-                            {/* Incrementar sesiones totales */}
-                            <button
-                              onClick={() => {
-                                const nextSessions = task.sessions + 1;
-                                updateTaskSessions(task.id, nextSessions);
-                              }}
-                              className="w-5 h-5 rounded bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-colors cursor-pointer text-xs font-bold"
-                              title="Aumentar sesiones objetivo"
+                              className="w-5 h-5 rounded bg-white/5 text-white/80 flex items-center justify-center hover:bg-white/10 disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer text-xs"
+                              title="Sumar sesión"
                             >
                               +
                             </button>
