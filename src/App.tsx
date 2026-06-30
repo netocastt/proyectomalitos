@@ -222,7 +222,8 @@ export default function App() {
 
   const [tasks, setTasks] = useState<Task[]>(() => {
     try {
-      const saved = localStorage.getItem('studyzen_tasks');
+      const lastUserId = localStorage.getItem('studyzen_last_user_id');
+      const saved = lastUserId ? localStorage.getItem(`studyzen_tasks_${lastUserId}`) : localStorage.getItem('studyzen_tasks');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -369,6 +370,7 @@ export default function App() {
       setAuthError(null);
       if (firebaseUser) {
         const uid = firebaseUser.uid;
+        localStorage.setItem('studyzen_last_user_id', uid);
         setCurrentUserId(uid);
         setAuthMode('loggedIn');
         
@@ -532,6 +534,8 @@ export default function App() {
       setTasks(fetchedTasks);
       localStorage.setItem(`studyzen_tasks_${currentUserId}`, JSON.stringify(fetchedTasks));
     }, (err) => {
+      console.error("Error al sincronizar tareas desde Firestore:", err);
+      showToast('Error al sincronizar tareas con el servidor. Usando datos locales.', 'info');
       handleFirestoreError(err, OperationType.GET, `users/${currentUserId}/tasks`);
     });
     
@@ -1139,9 +1143,13 @@ export default function App() {
   const addTask = async (title: string, date: string, difficulty: Task['difficulty']) => {
     if (!title || !date || !currentUserId) return;
     
-    const tempId = 'temp_' + Date.now();
-    const newTaskWithId: Task = {
-      id: tempId,
+    // Generar un ID real de Firestore en el cliente de forma síncrona
+    const tasksColRef = collection(db, 'users', currentUserId, 'tasks');
+    const newDocRef = doc(tasksColRef);
+    const taskId = newDocRef.id;
+
+    const newTask: Task = {
+      id: taskId,
       title,
       date,
       difficulty,
@@ -1151,7 +1159,7 @@ export default function App() {
     };
 
     // Actualización optimista de estado local y localStorage de inmediato
-    const updatedTasks = [...tasks, newTaskWithId];
+    const updatedTasks = [...tasks, newTask];
     setTasks(updatedTasks);
     localStorage.setItem(`studyzen_tasks_${currentUserId}`, JSON.stringify(updatedTasks));
 
@@ -1160,20 +1168,22 @@ export default function App() {
       date,
       difficulty,
       userId: currentUserId,
-      sessions: newTaskWithId.sessions,
+      sessions: newTask.sessions,
       completed: false,
       progress: 0
     };
 
     try {
-      await addDoc(collection(db, 'users', currentUserId, 'tasks'), dbPayload);
+      await setDoc(newDocRef, dbPayload);
       showToast('Tarea agregada con éxito', 'success');
-    } catch (err) {
+    } catch (err: any) {
+      console.error("Error al guardar la tarea en Firestore:", err);
       // Revertir en caso de error
-      setTasks(prev => prev.filter(t => t.id !== tempId));
-      const reverted = updatedTasks.filter(t => t.id !== tempId);
+      setTasks(prev => prev.filter(t => t.id !== taskId));
+      const reverted = updatedTasks.filter(t => t.id !== taskId);
       localStorage.setItem(`studyzen_tasks_${currentUserId}`, JSON.stringify(reverted));
-      handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}/tasks`);
+      showToast(`Error al guardar tarea: ${err?.message || err}`, 'error');
+      handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}/tasks/${taskId}`);
     }
   };
 
