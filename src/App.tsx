@@ -531,12 +531,56 @@ export default function App() {
           progress: data.progress || 0
         });
       });
-      setTasks(fetchedTasks);
-      localStorage.setItem(`studyzen_tasks_${currentUserId}`, JSON.stringify(fetchedTasks));
+      
+      // Sincronización robusta "local-first"
+      // Si tenemos tareas en localStorage que no están en Firestore, las conservamos y las subimos.
+      const localSaved = localStorage.getItem(`studyzen_tasks_${currentUserId}`);
+      let finalTasks = [...fetchedTasks];
+      
+      if (localSaved) {
+        try {
+          const localTasks: Task[] = JSON.parse(localSaved);
+          const localOnly = localTasks.filter(lt => !fetchedTasks.some(ft => ft.id === lt.id));
+          
+          if (localOnly.length > 0) {
+            // Subir tareas locales pendientes a Firestore de forma segura
+            localOnly.forEach(async (t) => {
+              try {
+                const docRef = doc(db, 'users', currentUserId, 'tasks', t.id);
+                await setDoc(docRef, {
+                  title: t.title,
+                  date: t.date,
+                  difficulty: t.difficulty,
+                  sessions: t.sessions,
+                  completed: t.completed,
+                  progress: t.progress,
+                  userId: currentUserId
+                });
+              } catch (e) {
+                console.error("Error al sincronizar tarea local a Firestore:", e);
+              }
+            });
+            finalTasks = [...fetchedTasks, ...localOnly];
+          }
+        } catch (e) {
+          console.warn("Error al parsear tareas locales para sincronización:", e);
+        }
+      }
+
+      setTasks(finalTasks);
+      localStorage.setItem(`studyzen_tasks_${currentUserId}`, JSON.stringify(finalTasks));
     }, (err) => {
       console.error("Error al sincronizar tareas desde Firestore:", err);
       showToast('Error al sincronizar tareas con el servidor. Usando datos locales.', 'info');
-      handleFirestoreError(err, OperationType.GET, `users/${currentUserId}/tasks`);
+      // No lanzamos error fatal para evitar crasheos, simplemente usamos lo que tenemos en localStorage.
+      const localSaved = localStorage.getItem(`studyzen_tasks_${currentUserId}`);
+      if (localSaved) {
+        try {
+          setTasks(JSON.parse(localSaved));
+        } catch (e) {
+          console.error("Error al restaurar tareas locales en fallback:", e);
+        }
+      }
     });
     
     return () => unsubscribe();
