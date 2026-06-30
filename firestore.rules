@@ -64,9 +64,7 @@ service cloud.firestore {
       allow delete: if isOwner(userId);
       
       match /tasks/{taskId} {
-        allow get, delete: if isOwner(userId) && isValidId(taskId);
-        allow list: if isOwner(userId);
-        allow create, update: if isOwner(userId) && isValidId(taskId) && isValidTask(incoming(), userId);
+        allow read, write: if isOwner(userId);
       }
     }
   }
