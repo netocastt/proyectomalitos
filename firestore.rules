@@ -17,7 +17,7 @@ service cloud.firestore {
     }
     
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() <= 128;
     }
     
     function incoming() {
@@ -39,6 +39,7 @@ service cloud.firestore {
         && (data.longBreak == null || data.longBreak is int || data.longBreak is float)
         && (data.activeSound == null || (data.activeSound is string && data.activeSound.size() <= 100))
         && (data.sessionsCompleted == null || data.sessionsCompleted is int || data.sessionsCompleted is float)
+        && (data.totalFocusMinutes == null || data.totalFocusMinutes is int || data.totalFocusMinutes is float)
         && (data.currentStreak == null || data.currentStreak is int || data.currentStreak is float)
         && (data.bestStreak == null || data.bestStreak is int || data.bestStreak is float)
         && (data.lastActiveDate == null || (data.lastActiveDate is string && data.lastActiveDate.size() <= 50))
@@ -53,6 +54,7 @@ service cloud.firestore {
         && data.completed is bool
         && (data.difficulty == null || (data.difficulty is string && data.difficulty.size() <= 50))
         && (data.sessions == null || data.sessions is int || data.sessions is float)
+        && (data.progress == null || data.progress is int || data.progress is float)
         && (data.date == null || (data.date is string && data.date.size() <= 50));
     }
     
