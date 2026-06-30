@@ -316,19 +316,6 @@ export default function App() {
   const [taskTitleInput, setTaskTitleInput] = useState('');
   const [taskDateInput, setTaskDateInput] = useState('');
   const [taskDifficultyInput, setTaskDifficultyInput] = useState<Task['difficulty']>('Media');
-  const [taskSessionsInput, setTaskSessionsInput] = useState<number>(3);
-
-  // Sincronizar las sesiones propuestas basadas en la dificultad seleccionada y el tiempo de enfoque (Pomodoro)
-  useEffect(() => {
-    const focusTime = sessionConfig?.focusTime || 25;
-    let targetMinutes = 75; // Media por defecto
-    if (taskDifficultyInput === 'Alta') {
-      targetMinutes = 125;
-    } else if (taskDifficultyInput === 'Baja') {
-      targetMinutes = 25;
-    }
-    setTaskSessionsInput(Math.max(1, Math.round(targetMinutes / focusTime)));
-  }, [taskDifficultyInput, sessionConfig?.focusTime]);
 
   // Estados para agregar sonidos o música personalizados
   const [showAddSoundForm, setShowAddSoundForm] = useState(false);
@@ -1153,7 +1140,7 @@ export default function App() {
   const progress = (totalSessionTime - timeLeft) / totalSessionTime;
 
   // --- Lógica de Tareas (Firestore) ---
-  const addTask = async (title: string, date: string, difficulty: Task['difficulty'], customSessions?: number) => {
+  const addTask = async (title: string, date: string, difficulty: Task['difficulty']) => {
     if (!title || !date || !currentUserId) return;
     
     // Generar un ID real de Firestore en el cliente de forma síncrona
@@ -1161,7 +1148,15 @@ export default function App() {
     const newDocRef = doc(tasksColRef);
     const taskId = newDocRef.id;
 
-    const sessionsCount = customSessions !== undefined ? customSessions : (difficulty === 'Alta' ? 5 : difficulty === 'Media' ? 3 : 1);
+    // Calcular las sesiones propuestas basadas en la dificultad seleccionada y el tiempo de enfoque (Pomodoro)
+    const focusTime = sessionConfig?.focusTime || 25;
+    let targetMinutes = 75; // Media por defecto
+    if (difficulty === 'Alta') {
+      targetMinutes = 125;
+    } else if (difficulty === 'Baja') {
+      targetMinutes = 25;
+    }
+    const sessionsCount = Math.max(1, Math.round(targetMinutes / focusTime));
 
     const newTask: Task = {
       id: taskId,
@@ -2063,7 +2058,7 @@ export default function App() {
                     placeholder="Asignatura o Proyecto" 
                     className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:ring-1 focus:ring-primary-container transition-all"
                   />
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <input 
                       type="date" 
                       value={taskDateInput}
@@ -2079,26 +2074,14 @@ export default function App() {
                       <option value="Media">Media</option>
                       <option value="Alta">Trabajo Profundo</option>
                     </select>
-                    <div className="flex items-center bg-white/5 border border-white/10 rounded-xl p-3 gap-2">
-                      <span className="text-xs text-on-surface-variant shrink-0 font-medium">Sesiones:</span>
-                      <input 
-                        type="number"
-                        min="1"
-                        max="20"
-                        value={taskSessionsInput}
-                        onChange={(e) => setTaskSessionsInput(Math.max(1, parseInt(e.target.value) || 1))}
-                        className="bg-transparent w-full outline-none text-sm text-white font-bold"
-                      />
-                    </div>
                   </div>
                   <button 
                     onClick={() => {
                       if (taskTitleInput.trim() && taskDateInput) {
-                        addTask(taskTitleInput.trim(), taskDateInput, taskDifficultyInput, taskSessionsInput);
+                        addTask(taskTitleInput.trim(), taskDateInput, taskDifficultyInput);
                         setTaskTitleInput('');
                         setTaskDateInput('');
                         setTaskDifficultyInput('Media');
-                        setTaskSessionsInput(3);
                       } else {
                         showToast("Por favor, llena la asignatura y la fecha.", "error");
                       }
