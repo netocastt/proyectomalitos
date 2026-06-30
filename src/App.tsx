@@ -1133,44 +1133,95 @@ export default function App() {
   // --- Lógica de Tareas (Firestore) ---
   const addTask = async (title: string, date: string, difficulty: Task['difficulty']) => {
     if (!title || !date || !currentUserId) return;
-    const newTask = {
+    
+    const tempId = 'temp_' + Date.now();
+    const newTaskWithId: Task = {
+      id: tempId,
       title,
       date,
       difficulty,
-      userId: currentUserId,
       sessions: difficulty === 'Alta' ? 5 : difficulty === 'Media' ? 3 : 1,
       completed: false,
       progress: 0
     };
+
+    // Actualización optimista de estado local y localStorage de inmediato
+    const updatedTasks = [...tasks, newTaskWithId];
+    setTasks(updatedTasks);
+    localStorage.setItem(`studyzen_tasks_${currentUserId}`, JSON.stringify(updatedTasks));
+
+    const dbPayload = {
+      title,
+      date,
+      difficulty,
+      userId: currentUserId,
+      sessions: newTaskWithId.sessions,
+      completed: false,
+      progress: 0
+    };
+
     try {
-      await addDoc(collection(db, 'users', currentUserId, 'tasks'), newTask);
+      await addDoc(collection(db, 'users', currentUserId, 'tasks'), dbPayload);
+      showToast('Tarea agregada con éxito', 'success');
     } catch (err) {
+      // Revertir en caso de error
+      setTasks(prev => prev.filter(t => t.id !== tempId));
+      const reverted = updatedTasks.filter(t => t.id !== tempId);
+      localStorage.setItem(`studyzen_tasks_${currentUserId}`, JSON.stringify(reverted));
       handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}/tasks`);
     }
   };
 
   const deleteTask = async (id: string) => {
     if (!currentUserId) return;
+    
+    const previousTasks = [...tasks];
+    
+    // Actualización optimista
+    const updatedTasks = tasks.filter(t => t.id !== id);
+    setTasks(updatedTasks);
+    localStorage.setItem(`studyzen_tasks_${currentUserId}`, JSON.stringify(updatedTasks));
+
+    if (activeTaskId === id) {
+      setActiveTaskId(null);
+    }
+
     try {
       const taskDocRef = doc(db, 'users', currentUserId, 'tasks', id);
       await deleteDoc(taskDocRef);
       showToast('Tarea eliminada con éxito', 'success');
-      if (activeTaskId === id) {
-        setActiveTaskId(null);
-      }
     } catch (err) {
+      // Revertir en caso de error
+      setTasks(previousTasks);
+      localStorage.setItem(`studyzen_tasks_${currentUserId}`, JSON.stringify(previousTasks));
       handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}/tasks/${id}`);
     }
   };
 
   const toggleTask = async (id: string, currentCompleted: boolean) => {
     if (!currentUserId) return;
+
+    const previousTasks = [...tasks];
+    
+    // Actualización optimista
+    const updatedTasks = tasks.map(t => {
+      if (t.id === id) {
+        return { ...t, completed: !currentCompleted };
+      }
+      return t;
+    });
+    setTasks(updatedTasks);
+    localStorage.setItem(`studyzen_tasks_${currentUserId}`, JSON.stringify(updatedTasks));
+
     try {
       const taskDocRef = doc(db, 'users', currentUserId, 'tasks', id);
       await updateDoc(taskDocRef, {
         completed: !currentCompleted
       });
     } catch (err) {
+      // Revertir en caso de error
+      setTasks(previousTasks);
+      localStorage.setItem(`studyzen_tasks_${currentUserId}`, JSON.stringify(previousTasks));
       handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}/tasks/${id}`);
     }
   };
@@ -2143,7 +2194,7 @@ export default function App() {
                       <h3 className="font-bold px-1">Mi Cuenta</h3>
                       <div className="space-y-3">
                         {[
-                          { label: 'Configuración de Sesiones', sub: 'Tiempos de enfoque y descanso', icon: Timer, screen: 'session-settings' },
+                          { label: 'Tiempo de Enfoque', sub: 'Modifica tu duración de enfoque', icon: Timer, screen: 'session-settings' },
                           { label: 'Biblioteca de Sonidos', sub: 'Personaliza tu atmósfera de Zen', icon: Sparkles, screen: 'sound-library' }
                         ].map((item, i) => (
                           <div 
@@ -2188,26 +2239,20 @@ export default function App() {
                       <ChevronRight className="w-5 h-5 rotate-180" />
                       <span>Volver al perfil</span>
                     </button>
-                    <h3 className="text-2xl font-bold">Configuración de Sesiones</h3>
+                    <h3 className="text-2xl font-bold">Configurar Enfoque</h3>
                     <div className="glass p-6 rounded-3xl space-y-8">
-                      {[
-                        { label: 'Tiempo de Enfoque', key: 'focusTime' },
-                        { label: 'Descanso Corto', key: 'shortBreak' },
-                        { label: 'Descanso Largo', key: 'longBreak' }
-                      ].map((item) => (
-                        <div key={item.key} className="space-y-4">
-                          <div className="flex justify-between items-center px-1">
-                            <label className="text-sm font-bold uppercase tracking-widest opacity-70">{item.label}</label>
-                            <span className="text-primary-container font-bold">{sessionConfig[item.key as keyof SessionConfig]} min</span>
-                          </div>
-                          <input 
-                            type="range" min="1" max="60" 
-                            value={sessionConfig[item.key as keyof SessionConfig]} 
-                            onChange={(e) => updateSessionConfig(item.key as keyof SessionConfig, parseInt(e.target.value))}
-                            className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-primary-container"
-                          />
+                      <div className="space-y-4">
+                        <div className="flex justify-between items-center px-1">
+                          <label className="text-sm font-bold uppercase tracking-widest opacity-70">Tiempo de Enfoque</label>
+                          <span className="text-primary-container font-bold">{sessionConfig.focusTime} min</span>
                         </div>
-                      ))}
+                        <input 
+                          type="range" min="1" max="60" 
+                          value={sessionConfig.focusTime} 
+                          onChange={(e) => updateSessionConfig('focusTime', parseInt(e.target.value))}
+                          className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-primary-container"
+                        />
+                      </div>
                       <p className="text-xs text-on-surface-variant italic text-center px-4">
                         El tiempo de enfoque se guardará perpetuamente en la nube.
                       </p>
