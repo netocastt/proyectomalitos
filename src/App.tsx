@@ -139,6 +139,7 @@ interface Task {
   difficulty: 'Baja' | 'Media' | 'Alta';
   sessions: number;
   completed: boolean;
+  progress: number;
 }
 
 interface UserProfile {
@@ -276,6 +277,10 @@ export default function App() {
   const [weekCommencedDate, setWeekCommencedDate] = useState<string>(() => {
     return localStorage.getItem('studyzen_week_commenced_date') || '';
   });
+  const [totalFocusMinutes, setTotalFocusMinutes] = useState<number>(() => {
+    const saved = localStorage.getItem('studyzen_total_focus_minutes');
+    return saved ? parseInt(saved, 10) : 0;
+  });
 
   // Ambient Sound Synthesis Engine using Web Audio API
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -306,6 +311,7 @@ export default function App() {
   // Perfil y Modales
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const isCompletingRef = useRef(false);
 
   // Estados para edición directa de nombre
   const [isEditingName, setIsEditingName] = useState(false);
@@ -465,6 +471,14 @@ export default function App() {
           setSessionsCompleted(data.sessionsCompleted);
           localStorage.setItem(`studyzen_sessionsCompleted_${currentUserId}`, String(data.sessionsCompleted));
         }
+        if (typeof data.totalFocusMinutes === 'number') {
+          setTotalFocusMinutes(data.totalFocusMinutes);
+          localStorage.setItem(`studyzen_total_focus_minutes_${currentUserId}`, String(data.totalFocusMinutes));
+        } else {
+          const fallback = (data.sessionsCompleted || 0) * (typeof data.focusTime === 'number' ? data.focusTime : 25);
+          setTotalFocusMinutes(fallback);
+          localStorage.setItem(`studyzen_total_focus_minutes_${currentUserId}`, String(fallback));
+        }
 
         // Cargar estadísticas sincronizadas
         const currentStr = typeof data.currentStreak === 'number' ? data.currentStreak : 0;
@@ -519,7 +533,8 @@ export default function App() {
           date: data.date || '',
           difficulty: data.difficulty || 'Media',
           sessions: data.sessions || 1,
-          completed: !!data.completed
+          completed: !!data.completed,
+          progress: data.progress || 0
         });
       });
       setTasks(fetchedTasks);
@@ -559,6 +574,9 @@ export default function App() {
       const wc = localStorage.getItem(`studyzen_weekCommencedDate_${currentUserId}`);
       if (wc) setWeekCommencedDate(wc);
 
+      const tf = localStorage.getItem(`studyzen_total_focus_minutes_${currentUserId}`);
+      if (tf) setTotalFocusMinutes(Number(tf));
+
       const snd = localStorage.getItem(`studyzen_custom_sounds_${currentUserId}`);
       if (snd) setCustomSounds(JSON.parse(snd));
 
@@ -591,10 +609,11 @@ export default function App() {
       localStorage.setItem(`studyzen_weeklyMinutes_${currentUserId}`, JSON.stringify(weeklyMinutes));
       localStorage.setItem(`studyzen_lastActiveDate_${currentUserId}`, lastActiveDate);
       localStorage.setItem(`studyzen_weekCommencedDate_${currentUserId}`, weekCommencedDate);
+      localStorage.setItem(`studyzen_total_focus_minutes_${currentUserId}`, String(totalFocusMinutes));
     } catch (e) {
       console.error("Error writing to localStorage:", e);
     }
-  }, [sessionConfig, sessionsCompleted, currentStreak, bestStreak, weeklyMinutes, lastActiveDate, weekCommencedDate, currentUserId]);
+  }, [sessionConfig, sessionsCompleted, currentStreak, bestStreak, weeklyMinutes, lastActiveDate, weekCommencedDate, totalFocusMinutes, currentUserId]);
 
   // --- Ambient Sound Synthesis Engine using Web Audio API ---
   const startAmbientSound = (soundName: string) => {
@@ -929,9 +948,10 @@ export default function App() {
   // Actualizar tiempo del temporizador cuando cambie la config y el temporizador no esté corriendo
   useEffect(() => {
     if (!isActive) {
-      setTimeLeft(isBreak ? sessionConfig.shortBreak * 60 : sessionConfig.focusTime * 60);
+      const isLongBreak = isBreak && sessionsCompleted % 4 === 0 && sessionsCompleted > 0;
+      setTimeLeft(isBreak ? (isLongBreak ? sessionConfig.longBreak : sessionConfig.shortBreak) * 60 : sessionConfig.focusTime * 60);
     }
-  }, [sessionConfig.shortBreak, sessionConfig.focusTime, isBreak]);
+  }, [sessionConfig.shortBreak, sessionConfig.longBreak, sessionConfig.focusTime, isBreak, sessionsCompleted, isActive]);
 
   // --- Lógica del Temporizador ---
   useEffect(() => {
@@ -956,7 +976,10 @@ export default function App() {
     
     // YYYY-MM-DD in local representation
     const localDate = new Date();
-    const todayStr = localDate.toLocaleDateString('en-CA');
+    const year = localDate.getFullYear();
+    const month = String(localDate.getMonth() + 1).padStart(2, '0');
+    const day = String(localDate.getDate()).padStart(2, '0');
+    const todayStr = `${year}-${month}-${day}`;
     const todayDayOfWeek = (localDate.getDay() + 6) % 7; // Mon=0, Tue=1, ..., Sun=6
     
     let newCurrentStreak = currentStreak;
@@ -965,10 +988,13 @@ export default function App() {
     
     const getMondayDateStr = (d: Date) => {
       const copy = new Date(d);
-      const day = copy.getDay();
-      const diff = copy.getDate() - day + (day === 0 ? -6 : 1);
+      const dayVal = copy.getDay();
+      const diff = copy.getDate() - dayVal + (dayVal === 0 ? -6 : 1);
       const mon = new Date(copy.setDate(diff));
-      return mon.toLocaleDateString('en-CA');
+      const mYear = mon.getFullYear();
+      const mMonth = String(mon.getMonth() + 1).padStart(2, '0');
+      const mDay = String(mon.getDate()).padStart(2, '0');
+      return `${mYear}-${mMonth}-${mDay}`;
     };
     const currentWeekCommenced = getMondayDateStr(new Date());
     
@@ -983,7 +1009,10 @@ export default function App() {
     } else {
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toLocaleDateString('en-CA');
+      const yYear = yesterday.getFullYear();
+      const yMonth = String(yesterday.getMonth() + 1).padStart(2, '0');
+      const yDay = String(yesterday.getDate()).padStart(2, '0');
+      const yesterdayStr = `${yYear}-${yMonth}-${yDay}`;
       
       if (lastActiveDate === yesterdayStr || lastActiveDate === '') {
         newCurrentStreak += 1;
@@ -996,11 +1025,14 @@ export default function App() {
       newBestStreak = newCurrentStreak;
     }
     
+    const newTotalFocusMinutes = totalFocusMinutes + sessionConfig.focusTime;
+    
     setCurrentStreak(newCurrentStreak);
     setBestStreak(newBestStreak);
     setWeeklyMinutes(newWeeklyMinutes);
     setLastActiveDate(todayStr);
     setWeekCommencedDate(currentWeekCommenced);
+    setTotalFocusMinutes(newTotalFocusMinutes);
     
     try {
       await updateDoc(doc(db, 'users', currentUserId), {
@@ -1009,7 +1041,8 @@ export default function App() {
         bestStreak: newBestStreak,
         lastActiveDate: todayStr,
         weekCommencedDate: currentWeekCommenced,
-        weeklyMinutes: newWeeklyMinutes
+        weeklyMinutes: newWeeklyMinutes,
+        totalFocusMinutes: newTotalFocusMinutes
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}`);
@@ -1017,8 +1050,12 @@ export default function App() {
   };
 
   const handleTimerComplete = async () => {
+    if (isCompletingRef.current) return;
+    isCompletingRef.current = true;
+
     setIsActive(false);
     setIsAmbientSoundPlaying(false);
+    
     if (!isBreak) {
       const nextSessions = sessionsCompleted + 1;
       setSessionsCompleted(nextSessions);
@@ -1030,25 +1067,22 @@ export default function App() {
       if (activeTaskId) {
         const targetTask = tasks.find(t => t.id === activeTaskId);
         if (targetTask) {
-          const currentProgress = taskProgress[activeTaskId] || 0;
-          const nextTaskProgress = currentProgress + 1;
-          const updatedProgress = { ...taskProgress, [activeTaskId]: nextTaskProgress };
-          setTaskProgress(updatedProgress);
-          localStorage.setItem('studyzen_task_progress', JSON.stringify(updatedProgress));
-
-          if (nextTaskProgress >= targetTask.sessions) {
-            try {
-              const taskDocRef = doc(db, 'users', currentUserId!, 'tasks', activeTaskId);
-              await updateDoc(taskDocRef, {
-                completed: true
-              });
+          const nextTaskProgress = (targetTask.progress || 0) + 1;
+          const isCompleted = nextTaskProgress >= targetTask.sessions;
+          try {
+            const taskDocRef = doc(db, 'users', currentUserId!, 'tasks', activeTaskId);
+            await updateDoc(taskDocRef, {
+              progress: nextTaskProgress,
+              completed: isCompleted
+            });
+            if (isCompleted) {
               showToast(`¡Excelente! Completaste todas las sesiones de: ${targetTask.title}`, 'success');
               setActiveTaskId(null);
-            } catch (err) {
-              console.error("Error al completar tarea automáticamente:", err);
+            } else {
+              showToast(`¡Sesión de ${targetTask.title} registrada! (${nextTaskProgress}/${targetTask.sessions})`, 'success');
             }
-          } else {
-            showToast(`¡Sesión de ${targetTask.title} registrada! (${nextTaskProgress}/${targetTask.sessions})`, 'success');
+          } catch (err) {
+            console.error("Error al completar tarea automáticamente:", err);
           }
         }
       } else {
@@ -1063,6 +1097,8 @@ export default function App() {
       setTimeLeft(sessionConfig.focusTime * 60);
       setIsBreak(false);
     }
+
+    isCompletingRef.current = false;
   };
 
   const toggleTimer = () => {
@@ -1078,7 +1114,9 @@ export default function App() {
   const resetTimer = () => {
     setIsActive(false);
     setIsAmbientSoundPlaying(false);
-    setTimeLeft(isBreak ? sessionConfig.shortBreak * 60 : sessionConfig.focusTime * 60);
+    isCompletingRef.current = false;
+    const isLongBreak = isBreak && sessionsCompleted % 4 === 0 && sessionsCompleted > 0;
+    setTimeLeft(isBreak ? (isLongBreak ? sessionConfig.longBreak : sessionConfig.shortBreak) * 60 : sessionConfig.focusTime * 60);
   };
 
   const formatTime = (seconds: number) => {
@@ -1101,12 +1139,27 @@ export default function App() {
       difficulty,
       userId: currentUserId,
       sessions: difficulty === 'Alta' ? 5 : difficulty === 'Media' ? 3 : 1,
-      completed: false
+      completed: false,
+      progress: 0
     };
     try {
       await addDoc(collection(db, 'users', currentUserId, 'tasks'), newTask);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}/tasks`);
+    }
+  };
+
+  const deleteTask = async (id: string) => {
+    if (!currentUserId) return;
+    try {
+      const taskDocRef = doc(db, 'users', currentUserId, 'tasks', id);
+      await deleteDoc(taskDocRef);
+      showToast('Tarea eliminada con éxito', 'success');
+      if (activeTaskId === id) {
+        setActiveTaskId(null);
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `users/${currentUserId}/tasks/${id}`);
     }
   };
 
@@ -1722,7 +1775,7 @@ export default function App() {
                       {formatTime(timeLeft)}
                     </span>
                     <span className={`font-semibold uppercase tracking-widest text-xs ${isBreak ? 'text-secondary' : 'text-primary-container'}`}>
-                      {isBreak ? 'Enfriamiento' : 'Enfoque Profundo'}
+                      {isBreak ? ((sessionsCompleted % 4 === 0 && sessionsCompleted > 0) ? 'Descanso Largo' : 'Descanso Corto') : 'Enfoque Profundo'}
                     </span>
                   </motion.div>
                 </div>
@@ -1907,27 +1960,52 @@ export default function App() {
                   tasks.map(task => (
                     <div 
                       key={task.id} 
-                      onClick={() => toggleTask(task.id, task.completed)}
-                      className={`glass p-5 rounded-2xl border-l-4 ${task.difficulty === 'Alta' ? 'border-primary-container' : 'border-secondary'} flex flex-col gap-3 group hover:bg-white/5 transition-all cursor-pointer`}
+                      className={`glass p-5 rounded-2xl border-l-4 ${task.difficulty === 'Alta' ? 'border-primary-container' : 'border-secondary'} flex flex-col gap-3 group hover:bg-white/5 transition-all relative`}
                     >
-                      <div className="flex justify-between items-start">
-                        <div className="space-y-1">
-                          <span className="text-[10px] font-bold uppercase tracking-widest text-primary-container bg-primary-container/10 px-2 py-0.5 rounded-full">Esfuerzo {task.difficulty}</span>
-                          <h4 className={`font-bold text-lg ${task.completed ? 'line-through opacity-40' : ''}`}>{task.title}</h4>
+                      <div className="flex justify-between items-start gap-3">
+                        <div className="flex items-start gap-3">
+                          <button 
+                            onClick={() => toggleTask(task.id, task.completed)}
+                            className={`p-1 rounded-full active:scale-90 transition-transform ${task.completed ? 'bg-primary-container/20 text-primary-container' : 'border border-white/20 text-on-surface-variant'}`}
+                            title={task.completed ? "Marcar como incompleta" : "Marcar como completada"}
+                          >
+                            <CheckCircle2 className="w-5 h-5" />
+                          </button>
+                          <div className="space-y-1">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-primary-container bg-primary-container/10 px-2 py-0.5 rounded-full">Esfuerzo {task.difficulty}</span>
+                            <h4 className={`font-bold text-lg ${task.completed ? 'line-through opacity-40 text-white/50' : 'text-white'}`}>{task.title}</h4>
+                          </div>
                         </div>
-                        <div className={`p-1 rounded-full ${task.completed ? 'bg-primary-container/20 text-primary-container' : 'border border-white/20'}`}>
-                          <CheckCircle2 className="w-5 h-5" />
-                        </div>
+                        
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteTask(task.id);
+                          }}
+                          className="p-2 text-red-400/60 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all active:scale-90"
+                          title="Eliminar tarea"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
-                      <div className="flex items-center gap-6 text-sm text-on-surface-variant">
+
+                      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-on-surface-variant pt-2 border-t border-white/5">
                         <div className="flex items-center gap-2">
-                          <Calendar className="w-4 h-4" />
+                          <Calendar className="w-4 h-4 text-secondary" />
                           <span>{task.date}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <Timer className="w-4 h-4" />
-                          <span>{task.sessions} sugeridas</span>
+                          <Timer className="w-4 h-4 text-secondary" />
+                          <span>Sesiones: {task.progress || 0}/{task.sessions}</span>
                         </div>
+                      </div>
+
+                      {/* Progress bar */}
+                      <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden mt-1">
+                        <div 
+                          className="bg-primary-container h-full transition-all duration-300"
+                          style={{ width: `${Math.min(100, ((task.progress || 0) / task.sessions) * 100)}%` }}
+                        />
                       </div>
                     </div>
                   ))
@@ -2024,9 +2102,9 @@ export default function App() {
                     className="space-y-8"
                   >
                     <div className="flex flex-col items-center py-4">
-                      <div className="relative group mb-6">
+                      <div className="relative mb-6">
                         <motion.div 
-                          whileHover={{ scale: 1.05 }}
+                          whileHover={{ scale: 1.02 }}
                           className="w-32 h-32 rounded-full glass p-1 glow-primary relative"
                         >
                           <div className="w-full h-full rounded-full overflow-hidden border-2 border-primary-container/20">
@@ -2037,76 +2115,17 @@ export default function App() {
                               referrerPolicy="no-referrer"
                             />
                           </div>
-                          <button 
-                            onClick={handleAvatarClick}
-                            className="absolute bottom-1 right-1 p-2 bg-primary-container text-slate-900 rounded-full shadow-lg active:scale-90 transition-transform cursor-pointer"
-                          >
-                            <Camera className="w-5 h-5" />
-                          </button>
-                          <input 
-                            type="file" 
-                            ref={fileInputRef} 
-                            className="hidden" 
-                            accept="image/*" 
-                            onChange={handleFileChange}
-                          />
                         </motion.div>
                       </div>
-                      {isEditingName ? (
-                        <div className="flex items-center gap-2 mt-4 justify-center w-full max-w-xs">
-                          <input
-                            type="text"
-                            value={tempNameText}
-                            onChange={(e) => setTempNameText(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                saveProfileNameDirectly(tempNameText);
-                                setIsEditingName(false);
-                              } else if (e.key === 'Escape') {
-                                setIsEditingName(false);
-                              }
-                            }}
-                            className="bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-center text-lg outline-none focus:ring-1 focus:ring-primary-container font-medium text-white w-full"
-                            autoFocus
-                          />
-                          <button
-                            onClick={() => {
-                              saveProfileNameDirectly(tempNameText);
-                              setIsEditingName(false);
-                            }}
-                            className="p-2 bg-primary-container text-slate-900 rounded-lg active:scale-90 transition-transform cursor-pointer shrink-0"
-                            title="Guardar"
-                          >
-                            <Check className="w-5 h-5" />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2 justify-center mt-4 group">
-                          <h2 
-                            onClick={() => {
-                              setTempNameText(user.name);
-                              setIsEditingName(true);
-                            }}
-                            className="text-2xl font-bold cursor-pointer hover:text-primary-container transition-colors"
-                          >
-                            {user.name}
-                          </h2>
-                          <button
-                            onClick={() => {
-                              setTempNameText(user.name);
-                              setIsEditingName(true);
-                            }}
-                            className="p-1 text-on-surface-variant hover:text-primary-container transition-colors opacity-60 group-hover:opacity-100"
-                            title="Editar nombre directamente"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )}
+                      
+                      <div className="text-center mt-2">
+                        <h2 className="text-2xl font-bold text-white">{user.name}</h2>
+                        <p className="text-sm text-on-surface-variant font-medium mt-1">{user.email}</p>
+                      </div>
                       
                       <div className="grid grid-cols-3 gap-3 mt-6 w-full px-2">
                         <div className="glass p-3 rounded-2xl text-center">
-                          <p className="text-lg font-bold">{sessionsCompleted * sessionConfig.focusTime}</p>
+                          <p className="text-lg font-bold">{totalFocusMinutes}</p>
                           <p className="text-[9px] uppercase tracking-wider font-bold opacity-50">Minutos Focus</p>
                         </div>
                         <div className="glass p-3 rounded-2xl text-center">
@@ -2124,8 +2143,7 @@ export default function App() {
                       <h3 className="font-bold px-1">Mi Cuenta</h3>
                       <div className="space-y-3">
                         {[
-                          { label: 'Ajustes de Perfil', sub: 'Seguridad y preferencias personales', icon: User, screen: 'profile-settings' },
-                          { label: 'Configuración de Sesiones', sub: 'Tiempos y notificaciones', icon: Timer, screen: 'session-settings' },
+                          { label: 'Configuración de Sesiones', sub: 'Tiempos de enfoque y descanso', icon: Timer, screen: 'session-settings' },
                           { label: 'Biblioteca de Sonidos', sub: 'Personaliza tu atmósfera de Zen', icon: Sparkles, screen: 'sound-library' }
                         ].map((item, i) => (
                           <div 
@@ -2155,54 +2173,6 @@ export default function App() {
                       <LogOut className="w-5 h-5" />
                       CERRAR SESIÓN
                     </button>
-                  </motion.div>
-                )}
-
-                {activeSubScreen === 'profile-settings' && (
-                  <motion.div
-                    key="profile-settings"
-                    initial={{ opacity: 0, x: 10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -10 }}
-                    className="space-y-6"
-                  >
-                    <button onClick={() => setActiveSubScreen('none')} className="flex items-center gap-2 text-on-surface-variant hover:text-primary-container transition-colors cursor-pointer">
-                      <ChevronRight className="w-5 h-5 rotate-180" />
-                      <span>Volver al perfil</span>
-                    </button>
-                    <h3 className="text-2xl font-bold">Ajustes de Perfil</h3>
-                    <div className="glass p-6 rounded-3xl space-y-6">
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-widest opacity-50 px-1">Nombre</label>
-                        <input 
-                          type="text" 
-                          value={editProfileName}
-                          onChange={(e) => setEditProfileName(e.target.value)}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none focus:ring-1 focus:ring-primary-container text-white"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-widest opacity-50 px-1">Correo Electrónico</label>
-                        <input 
-                          type="email" 
-                          value={editProfileEmail}
-                          disabled
-                          className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none opacity-50 cursor-not-allowed text-white/70"
-                        />
-                      </div>
-                      <button 
-                        onClick={() => {
-                          if (editProfileName.trim()) {
-                            saveProfileChanges(editProfileName.trim());
-                          } else {
-                            showToast("Por favor, ingresa tu nombre.", "error");
-                          }
-                        }}
-                        className="w-full py-4 bg-primary-container text-slate-900 font-bold rounded-xl active:scale-95 transition-all cursor-pointer"
-                      >
-                        GUARDAR CAMBIOS
-                      </button>
-                    </div>
                   </motion.div>
                 )}
 
