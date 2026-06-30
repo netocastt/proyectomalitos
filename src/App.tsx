@@ -2144,31 +2144,6 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <Timer className="w-4 h-4 text-secondary shrink-0" />
                           <span>Sesiones: <strong className="text-white">{task.progress || 0}</strong>/{task.sessions}</span>
-                          
-                          <div className="flex items-center gap-1 bg-white/5 px-1 py-0.5 rounded-lg border border-white/5 ml-1">
-                            <button
-                              onClick={() => {
-                                const nextProgress = Math.max(0, (task.progress || 0) - 1);
-                                updateTaskProgress(task.id, nextProgress);
-                              }}
-                              disabled={task.progress === 0}
-                              className="w-5 h-5 rounded bg-white/5 text-white/80 flex items-center justify-center hover:bg-white/10 disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer text-xs"
-                              title="Restar sesión"
-                            >
-                              -
-                            </button>
-                            <button
-                              onClick={() => {
-                                const nextProgress = Math.min(task.sessions, (task.progress || 0) + 1);
-                                updateTaskProgress(task.id, nextProgress);
-                              }}
-                              disabled={task.progress >= task.sessions}
-                              className="w-5 h-5 rounded bg-white/5 text-white/80 flex items-center justify-center hover:bg-white/10 disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer text-xs"
-                              title="Sumar sesión"
-                            >
-                              +
-                            </button>
-                          </div>
                         </div>
                       </div>
 
