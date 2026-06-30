@@ -171,14 +171,6 @@ export default function App() {
   // Sidebar and task control
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [taskProgress, setTaskProgress] = useState<Record<string, number>>(() => {
-    try {
-      const saved = localStorage.getItem('studyzen_task_progress');
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
   const [isAmbientSoundPlaying, setIsAmbientSoundPlaying] = useState(false);
   
   // Sonidos Personalizados del Usuario
@@ -1069,6 +1061,19 @@ export default function App() {
         if (targetTask) {
           const nextTaskProgress = (targetTask.progress || 0) + 1;
           const isCompleted = nextTaskProgress >= targetTask.sessions;
+          
+          // Actualización optimista de estado local y localStorage
+          const updatedTasks = tasks.map(t => {
+            if (t.id === activeTaskId) {
+              return { ...t, progress: nextTaskProgress, completed: isCompleted };
+            }
+            return t;
+          });
+          setTasks(updatedTasks);
+          if (currentUserId) {
+            localStorage.setItem(`studyzen_tasks_${currentUserId}`, JSON.stringify(updatedTasks));
+          }
+
           try {
             const taskDocRef = doc(db, 'users', currentUserId!, 'tasks', activeTaskId);
             await updateDoc(taskDocRef, {
@@ -1858,7 +1863,7 @@ export default function App() {
                 >
                   <option value="">Ninguna (Enfoque Libre)</option>
                   {tasks.filter(t => !t.completed).map(t => (
-                    <option key={t.id} value={t.id}>{t.title} ({taskProgress[t.id] || 0}/{t.sessions} ses.)</option>
+                    <option key={t.id} value={t.id}>{t.title} ({t.progress || 0}/{t.sessions} ses.)</option>
                   ))}
                 </select>
               </div>
@@ -1917,7 +1922,7 @@ export default function App() {
                     <p className="text-xs uppercase tracking-widest text-on-surface-variant font-bold">Sesiones hoy</p>
                     <p className="text-2xl font-bold">
                       {activeTaskId && tasks.find(t => t.id === activeTaskId)
-                        ? `${taskProgress[activeTaskId] || 0}/${tasks.find(t => t.id === activeTaskId)?.sessions}`
+                        ? `${tasks.find(t => t.id === activeTaskId)?.progress || 0}/${tasks.find(t => t.id === activeTaskId)?.sessions}`
                         : `${sessionsCompleted}/8`
                       }
                     </p>
