@@ -10,9 +10,9 @@
   --color-on-surface: #e5e2e1;
   --color-on-surface-variant: #bfc9c3;
   
-  --color-primary: #d5ffee;
-  --color-primary-container: #a8e6cf;
-  --color-on-primary-container: #2c6957;
+  --color-primary: #dafcf0;
+  --color-primary-container: #86cfb5;
+  --color-on-primary-container: #215444;
   
   --color-secondary: #88ceff;
   --color-secondary-container: #007cb1;
@@ -25,8 +25,8 @@
   body {
     @apply bg-surface text-on-surface font-sans antialiased;
     background-image: 
-      radial-gradient(circle at 0% 0%, rgba(168, 230, 207, 0.08) 0%, transparent 40%),
-      radial-gradient(circle at 100% 100%, rgba(136, 206, 255, 0.05) 0%, transparent 40%);
+      radial-gradient(circle at 0% 0%, rgba(134, 207, 181, 0.05) 0%, transparent 40%),
+      radial-gradient(circle at 100% 100%, rgba(136, 206, 255, 0.03) 0%, transparent 40%);
     min-height: 100vh;
   }
 }
@@ -36,5 +36,5 @@
 }
 
 .timer-glow {
-  filter: drop-shadow(0 0 15px rgba(168, 230, 207, 0.4));
+  filter: drop-shadow(0 0 12px rgba(134, 207, 181, 0.25));
 }
