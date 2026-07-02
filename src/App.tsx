@@ -162,6 +162,15 @@ interface SessionConfig {
   longBreak: number;
 }
 
+const getFocusDayString = (date: Date = new Date()) => {
+  // Desplazar el tiempo hacia atrás 4 horas, para que las 4:00 AM sea el inicio del día de enfoque.
+  const shiftedDate = new Date(date.getTime() - 4 * 60 * 60 * 1000);
+  const year = shiftedDate.getFullYear();
+  const month = String(shiftedDate.getMonth() + 1).padStart(2, '0');
+  const day = String(shiftedDate.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function App() {
   const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [loading, setLoading] = useState(true);
@@ -322,6 +331,21 @@ export default function App() {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const isCompletingRef = useRef(false);
 
+  // Refs de estado para evitar cierres obsoletos (stale closures) en llamadas asíncronas de temporizadores
+  const tasksRef = useRef<Task[]>([]);
+  const sessionsCompletedRef = useRef<number>(0);
+  const activeTaskIdRef = useRef<string | null>(null);
+  const sessionConfigRef = useRef(sessionConfig);
+  const isBreakRef = useRef(isBreak);
+  const currentUserIdRef = useRef<string | null>(null);
+
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+  useEffect(() => { sessionsCompletedRef.current = sessionsCompleted; }, [sessionsCompleted]);
+  useEffect(() => { activeTaskIdRef.current = activeTaskId; }, [activeTaskId]);
+  useEffect(() => { sessionConfigRef.current = sessionConfig; }, [sessionConfig]);
+  useEffect(() => { isBreakRef.current = isBreak; }, [isBreak]);
+  useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
+
   // Estados controlados para creación de tareas
   const [taskTitleInput, setTaskTitleInput] = useState('');
   const [taskDateInput, setTaskDateInput] = useState('');
@@ -331,7 +355,6 @@ export default function App() {
   const [showAddSoundForm, setShowAddSoundForm] = useState(false);
   const [newSoundName, setNewSoundName] = useState('');
   const [newSoundUrl, setNewSoundUrl] = useState('');
-  const [newSoundType, setNewSoundType] = useState<'url' | 'upload'>('url');
 
   // Helper para comprimir y recortar fotos de perfil a un tamaño óptimo
   const compressImage = (base64Str: string, maxWidth = 200, maxHeight = 200): Promise<string> => {
@@ -496,15 +519,36 @@ export default function App() {
             localStorage.removeItem(`studyzen_active_task_id_${currentUserId}`);
           }
         }
-        if (typeof data.sessionsCompleted === 'number') {
-          setSessionsCompleted(data.sessionsCompleted);
-          localStorage.setItem(`studyzen_sessionsCompleted_${currentUserId}`, String(data.sessionsCompleted));
+        const currentFocusDay = getFocusDayString(new Date());
+        const dbLastActiveDate = data.lastActiveDate || '';
+        
+        let loadedSessions = typeof data.sessionsCompleted === 'number' ? data.sessionsCompleted : 0;
+        let loadedLastActiveDate = dbLastActiveDate;
+
+        if (dbLastActiveDate !== '' && dbLastActiveDate !== currentFocusDay) {
+          // Nuevo día de enfoque después de las 4:00 AM, reiniciar sesiones completadas
+          loadedSessions = 0;
+          loadedLastActiveDate = currentFocusDay;
+          
+          // Actualizar silenciosamente en Firestore
+          try {
+            updateDoc(userDocRef, {
+              sessionsCompleted: 0,
+              lastActiveDate: currentFocusDay
+            });
+          } catch (e) {
+            console.error("Error al reiniciar sesiones completadas en un nuevo día:", e);
+          }
         }
+
+        setSessionsCompleted(loadedSessions);
+        localStorage.setItem(`studyzen_sessionsCompleted_${currentUserId}`, String(loadedSessions));
+        
         if (typeof data.totalFocusMinutes === 'number') {
           setTotalFocusMinutes(data.totalFocusMinutes);
           localStorage.setItem(`studyzen_total_focus_minutes_${currentUserId}`, String(data.totalFocusMinutes));
         } else {
-          const fallback = (data.sessionsCompleted || 0) * (typeof data.focusTime === 'number' ? data.focusTime : 25);
+          const fallback = loadedSessions * (typeof data.focusTime === 'number' ? data.focusTime : 25);
           setTotalFocusMinutes(fallback);
           localStorage.setItem(`studyzen_total_focus_minutes_${currentUserId}`, String(fallback));
         }
@@ -518,8 +562,8 @@ export default function App() {
         setBestStreak(bestStr);
         localStorage.setItem(`studyzen_bestStreak_${currentUserId}`, String(bestStr));
 
-        setLastActiveDate(data.lastActiveDate || '');
-        localStorage.setItem(`studyzen_lastActiveDate_${currentUserId}`, data.lastActiveDate || '');
+        setLastActiveDate(loadedLastActiveDate);
+        localStorage.setItem(`studyzen_lastActiveDate_${currentUserId}`, loadedLastActiveDate);
 
         setWeekCommencedDate(data.weekCommencedDate || '');
         localStorage.setItem(`studyzen_weekCommencedDate_${currentUserId}`, data.weekCommencedDate || '');
@@ -672,24 +716,40 @@ export default function App() {
         setTimeLeft(25 * 60);
       }
       
-      // Sesiones completadas
-      const s = localStorage.getItem(`studyzen_sessionsCompleted_${currentUserId}`);
-      setSessionsCompleted(s ? Number(s) : 0);
+      // Fechas de actividad y Sesiones completadas con chequeo de reinicio de 4 AM
+      const currentFocusDay = getFocusDayString(new Date());
+      const la = localStorage.getItem(`studyzen_lastActiveDate_${currentUserId}`) || '';
       
+      let sVal = 0;
+      let laVal = la;
+      
+      if (la !== '' && la !== currentFocusDay) {
+        // Nuevo día detectado por localStorage: reiniciar contador de sesiones
+        sVal = 0;
+        laVal = currentFocusDay;
+        localStorage.setItem(`studyzen_sessionsCompleted_${currentUserId}`, '0');
+        localStorage.setItem(`studyzen_lastActiveDate_${currentUserId}`, currentFocusDay);
+      } else {
+        const s = localStorage.getItem(`studyzen_sessionsCompleted_${currentUserId}`);
+        sVal = s ? Number(s) : 0;
+        if (la === '') {
+          laVal = currentFocusDay;
+          localStorage.setItem(`studyzen_lastActiveDate_${currentUserId}`, currentFocusDay);
+        }
+      }
+      setSessionsCompleted(sVal);
+      setLastActiveDate(laVal);
+
       // Rachas
       const cs = localStorage.getItem(`studyzen_currentStreak_${currentUserId}`);
       setCurrentStreak(cs ? Number(cs) : 0);
-      
+
       const bs = localStorage.getItem(`studyzen_bestStreak_${currentUserId}`);
       setBestStreak(bs ? Number(bs) : 0);
-      
+
       // Gráfica de minutos semanales
       const wm = localStorage.getItem(`studyzen_weeklyMinutes_${currentUserId}`);
       setWeeklyMinutes(wm ? JSON.parse(wm) : [0, 0, 0, 0, 0, 0, 0]);
-      
-      // Fechas de actividad
-      const la = localStorage.getItem(`studyzen_lastActiveDate_${currentUserId}`);
-      setLastActiveDate(la || '');
       
       const wc = localStorage.getItem(`studyzen_weekCommencedDate_${currentUserId}`);
       setWeekCommencedDate(wc || '');
@@ -1052,8 +1112,16 @@ export default function App() {
             if (node.stop && typeof node.stop === 'function') {
               node.stop();
             }
+            if (node.disconnect && typeof node.disconnect === 'function') {
+              node.disconnect();
+            }
           } catch (err) {}
         });
+
+        // Suspender el contexto de audio para ahorrar recursos de CPU y batería cuando no hay sonido activo
+        if (audioCtxRef.current && audioCtxRef.current.state === 'running' && activeSoundRef.current === '') {
+          audioCtxRef.current.suspend();
+        }
       }, 420);
     } catch (e) {
       console.warn("Could not stop audio safely:", e);
@@ -1182,63 +1250,89 @@ export default function App() {
 
     setIsActive(false);
     setIsAmbientSoundPlaying(false);
-    
-    if (!isBreak) {
-      const nextSessions = sessionsCompleted + 1;
+
+    // Obtener los valores más recientes de los refs para evitar closures obsoletas
+    const currentSessionsCompleted = sessionsCompletedRef.current;
+    const currentTasks = tasksRef.current;
+    const currentActiveTaskId = activeTaskIdRef.current;
+    const activeUid = currentUserIdRef.current;
+    const currentConfig = sessionConfigRef.current;
+    const currentIsBreak = isBreakRef.current;
+
+    if (!currentIsBreak) {
+      const nextSessions = currentSessionsCompleted + 1;
       setSessionsCompleted(nextSessions);
       
-      // Persistir incremento de sesiones y estadísticas en Firestore
-      await trackSessionCompletion(nextSessions);
-      
-      // Registrar automáticamente en la tarea seleccionada si existe
-      if (activeTaskId) {
-        const targetTask = tasks.find(t => t.id === activeTaskId);
+      // 1. Iniciar el guardado de la sesión del usuario
+      const userPromise = trackSessionCompletion(nextSessions);
+
+      // 2. Iniciar el guardado del progreso de la tarea si hay una seleccionada
+      let taskPromise = Promise.resolve();
+      let isTaskCompleted = false;
+      let targetTaskName = '';
+      let nextTaskProgressVal = 0;
+      let totalTaskSessions = 0;
+
+      if (currentActiveTaskId) {
+        const targetTask = currentTasks.find(t => t.id === currentActiveTaskId);
         if (targetTask) {
-          const nextTaskProgress = (targetTask.progress || 0) + 1;
-          const isCompleted = nextTaskProgress >= targetTask.sessions;
-          
-          // Actualización optimista de estado local y localStorage
-          const updatedTasks = tasks.map(t => {
-            if (t.id === activeTaskId) {
-              return { ...t, progress: nextTaskProgress, completed: isCompleted };
+          targetTaskName = targetTask.title;
+          totalTaskSessions = targetTask.sessions;
+          nextTaskProgressVal = (targetTask.progress || 0) + 1;
+          isTaskCompleted = nextTaskProgressVal >= targetTask.sessions;
+
+          // Actualización optimista del estado local y localStorage de tareas
+          const updatedTasks = currentTasks.map(t => {
+            if (t.id === currentActiveTaskId) {
+              return { ...t, progress: nextTaskProgressVal, completed: isTaskCompleted };
             }
             return t;
           });
           setTasks(updatedTasks);
-          if (currentUserId) {
-            localStorage.setItem(`studyzen_tasks_${currentUserId}`, JSON.stringify(updatedTasks));
+          if (activeUid) {
+            localStorage.setItem(`studyzen_tasks_${activeUid}`, JSON.stringify(updatedTasks));
           }
 
-          try {
-            const taskDocRef = doc(db, 'users', currentUserId!, 'tasks', activeTaskId);
-            await updateDoc(taskDocRef, {
-              progress: nextTaskProgress,
-              completed: isCompleted
-            });
-            if (isCompleted) {
-              showToast(`¡Excelente! Completaste todas las sesiones de: ${targetTask.title}`, 'success');
-              setActiveTaskId(null);
-              if (currentUserId) {
-                localStorage.removeItem(`studyzen_active_task_id_${currentUserId}`);
-                await updateDoc(doc(db, 'users', currentUserId), { activeTaskId: null });
+          taskPromise = (async () => {
+            try {
+              if (activeUid) {
+                const taskDocRef = doc(db, 'users', activeUid, 'tasks', currentActiveTaskId);
+                await updateDoc(taskDocRef, {
+                  progress: nextTaskProgressVal,
+                  completed: isTaskCompleted
+                });
+                if (isTaskCompleted) {
+                  setActiveTaskId(null);
+                  localStorage.removeItem(`studyzen_active_task_id_${activeUid}`);
+                  await updateDoc(doc(db, 'users', activeUid), { activeTaskId: null });
+                }
               }
-            } else {
-              showToast(`¡Sesión de ${targetTask.title} registrada! (${nextTaskProgress}/${targetTask.sessions})`, 'success');
+            } catch (err) {
+              console.error("Error al completar la tarea automáticamente en Firestore:", err);
             }
-          } catch (err) {
-            console.error("Error al completar tarea automáticamente:", err);
-          }
+          })();
+        }
+      }
+
+      // Esperar a que se completen ambas operaciones en paralelo de forma segura
+      await Promise.all([userPromise, taskPromise]);
+
+      if (currentActiveTaskId && targetTaskName) {
+        if (isTaskCompleted) {
+          showToast(`¡Excelente! Completaste todas las sesiones de: ${targetTaskName}`, 'success');
+        } else {
+          showToast(`¡Sesión de ${targetTaskName} registrada! (${nextTaskProgressVal}/${totalTaskSessions})`, 'success');
         }
       } else {
         showToast('¡Sesión terminada! Tómate un descanso.', 'success');
       }
 
-      const nextBreak = nextSessions % 4 === 0 ? sessionConfig.longBreak : sessionConfig.shortBreak;
+      const nextBreak = nextSessions % 4 === 0 ? currentConfig.longBreak : currentConfig.shortBreak;
       setTimeLeft(nextBreak * 60);
       setIsBreak(true);
     } else {
       showToast('¡Descanso terminado! ¿Listo para otra sesión?', 'info');
-      setTimeLeft(sessionConfig.focusTime * 60);
+      setTimeLeft(currentConfig.focusTime * 60);
       setIsBreak(false);
     }
 
@@ -1555,7 +1649,7 @@ export default function App() {
   // Agregar Sonido o Música Personalizados
   const handleAddCustomSound = async () => {
     if (!newSoundName.trim() || !newSoundUrl.trim()) {
-      showToast("Por favor ingresa un nombre y el enlace o archivo de audio.", "error");
+      showToast("Por favor ingresa un nombre y selecciona un archivo de audio.", "error");
       return;
     }
     const activeUid = currentUserId || auth.currentUser?.uid;
@@ -2751,80 +2845,51 @@ export default function App() {
                             />
                           </div>
 
-                          <div className="flex gap-2 p-1 bg-white/5 rounded-xl text-xs">
-                            <button
-                              type="button"
-                              onClick={() => { setNewSoundType('url'); setNewSoundUrl(''); }}
-                              className={`flex-1 py-2 rounded-lg font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${newSoundType === 'url' ? 'bg-primary-container text-slate-900' : 'opacity-60 hover:opacity-100'}`}
-                            >
-                              <Link className="w-3.5 h-3.5" />
-                              Por Enlace URL
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => { setNewSoundType('upload'); setNewSoundUrl(''); }}
-                              className={`flex-1 py-2 rounded-lg font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer ${newSoundType === 'upload' ? 'bg-primary-container text-slate-900' : 'opacity-60 hover:opacity-100'}`}
-                            >
-                              <Upload className="w-3.5 h-3.5" />
-                              Subir Archivo
-                            </button>
-                          </div>
-
-                          {newSoundType === 'url' ? (
-                            <div className="space-y-2">
-                              <label className="text-xs font-bold uppercase tracking-widest opacity-50">Enlace de Audio (URL)</label>
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold uppercase tracking-widest opacity-50">Seleccionar Archivo de Audio</label>
+                            <div className="relative w-full h-28 border border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center gap-1 hover:bg-white/5 transition-colors cursor-pointer overflow-hidden p-4">
+                              <Upload className="w-6 h-6 opacity-60 text-primary-container" />
+                              <span className="text-xs font-medium opacity-60 text-center">Subir loop o canción (mp3/wav/ogg, máx. 15MB)</span>
                               <input 
-                                type="text"
-                                value={newSoundUrl}
-                                onChange={(e) => setNewSoundUrl(e.target.value)}
-                                placeholder="https://ejemplo.com/audio.mp3"
-                                className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none text-white text-sm"
-                              />
-                              <p className="text-[10px] opacity-40">Introduce un enlace directo de streaming, lo-fi radio o archivo mp3 de la web.</p>
-                            </div>
-                          ) : (
-                            <div className="space-y-2">
-                              <label className="text-xs font-bold uppercase tracking-widest opacity-50">Seleccionar Archivo de Audio</label>
-                              <div className="relative w-full h-24 border border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center gap-1 hover:bg-white/5 transition-colors cursor-pointer overflow-hidden">
-                                <Upload className="w-6 h-6 opacity-60" />
-                                <span className="text-xs font-medium opacity-60">Subir loop o canción (máx. 15MB, mp3/wav/ogg)</span>
-                                <input 
-                                  type="file" 
-                                  accept="audio/*"
-                                  className="absolute inset-0 opacity-0 cursor-pointer"
-                                  onChange={async (e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) {
-                                      if (file.size > 15 * 1024 * 1024) {
-                                        showToast("El archivo excede los 15MB permitidos.", "error");
-                                        return;
-                                      }
-                                      const tempId = Math.random().toString(36).substring(2, 9);
-                                      try {
-                                        await saveLocalAudio(tempId, file);
-                                        setNewSoundUrl(`local://${tempId}`);
-                                        localSoundIdRef.current = tempId;
-                                        showToast("¡Archivo de audio cargado con éxito!", "success");
-                                      } catch (err) {
-                                        console.error("No se pudo guardar el audio localmente:", err);
-                                        showToast("Error al guardar el archivo de audio localmente en el dispositivo.", "error");
-                                      }
+                                type="file" 
+                                accept="audio/*"
+                                className="absolute inset-0 opacity-0 cursor-pointer"
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    if (file.size > 15 * 1024 * 1024) {
+                                      showToast("El archivo excede los 15MB permitidos.", "error");
+                                      return;
                                     }
-                                  }}
-                                />
-                                {newSoundUrl.startsWith('local://') && (
-                                  <div className="absolute inset-0 bg-primary-container text-slate-900 flex flex-col items-center justify-center text-xs font-bold">
-                                    <CheckCircle2 className="w-6 h-6 text-slate-900 mb-1" />
-                                    ¡Archivo de loop/canción listo localmente!
-                                  </div>
-                                )}
-                              </div>
+                                    const tempId = Math.random().toString(36).substring(2, 9);
+                                    try {
+                                      await saveLocalAudio(tempId, file);
+                                      setNewSoundUrl(`local://${tempId}`);
+                                      localSoundIdRef.current = tempId;
+                                      showToast("¡Archivo de audio cargado con éxito!", "success");
+                                    } catch (err) {
+                                      console.error("No se pudo guardar el audio localmente:", err);
+                                      showToast("Error al guardar el archivo de audio localmente en el dispositivo.", "error");
+                                    }
+                                  }
+                                }}
+                              />
+                              {newSoundUrl.startsWith('local://') && (
+                                <div className="absolute inset-0 bg-primary-container text-slate-900 flex flex-col items-center justify-center text-xs font-bold p-4">
+                                  <CheckCircle2 className="w-6 h-6 text-slate-900 mb-1" />
+                                  ¡Archivo de audio listo para guardar!
+                                </div>
+                              )}
                             </div>
-                          )}
+                          </div>
 
                           <div className="flex gap-2 pt-2">
                             <button 
-                              onClick={() => setShowAddSoundForm(false)}
+                              onClick={() => {
+                                setShowAddSoundForm(false);
+                                setNewSoundName('');
+                                setNewSoundUrl('');
+                              }}
                               className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl transition-all cursor-pointer text-xs uppercase"
                             >
                               Cancelar
