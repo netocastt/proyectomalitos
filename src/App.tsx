@@ -858,13 +858,28 @@ export default function App() {
         }
       }
 
-      // Initialize AudioContext
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      // Initialize AudioContext safely
+      let ctx: AudioContext | null = null;
+      try {
+        if (!audioCtxRef.current) {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          if (AudioContextClass) {
+            audioCtxRef.current = new AudioContextClass();
+          }
+        }
+        ctx = audioCtxRef.current || null;
+        if (ctx && ctx.state === 'suspended') {
+          ctx.resume().catch(e => console.warn("Failed to resume AudioContext:", e));
+        }
+      } catch (err) {
+        console.error("Failed to initialize AudioContext safely:", err);
+        showToast("El audio ambiental no es compatible con este navegador.", "info");
+        return;
       }
-      const ctx = audioCtxRef.current;
-      if (ctx.state === 'suspended') {
-        ctx.resume();
+
+      if (!ctx) {
+        console.warn("AudioContext is null or unsupported.");
+        return;
       }
 
       // Stop previous sounds
@@ -940,7 +955,9 @@ export default function App() {
           dropGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
 
           dropOsc.connect(dropGain);
-          dropGain.connect(masterGainRef.current!);
+          if (masterGainRef.current) {
+            dropGain.connect(masterGainRef.current);
+          }
           dropOsc.start();
           dropOsc.stop(ctx.currentTime + 0.1);
 
@@ -1004,7 +1021,9 @@ export default function App() {
           chirpGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
 
           chirpOsc.connect(chirpGain);
-          chirpGain.connect(masterGainRef.current!);
+          if (masterGainRef.current) {
+            chirpGain.connect(masterGainRef.current);
+          }
           chirpOsc.start();
           chirpOsc.stop(ctx.currentTime + 0.16);
 
@@ -1052,7 +1071,9 @@ export default function App() {
             clickGain.gain.setValueAtTime(0.05, ctx.currentTime);
             clickGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.015);
             clickOsc.connect(clickGain);
-            clickGain.connect(masterGainRef.current!);
+            if (masterGainRef.current) {
+              clickGain.connect(masterGainRef.current);
+            }
             clickOsc.start();
             clickOsc.stop(ctx.currentTime + 0.02);
           } else {
@@ -1063,7 +1084,9 @@ export default function App() {
             clinkGain.gain.setValueAtTime(0.015, ctx.currentTime);
             clinkGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.2);
             clinkOsc.connect(clinkGain);
-            clinkGain.connect(masterGainRef.current!);
+            if (masterGainRef.current) {
+              clinkGain.connect(masterGainRef.current);
+            }
             clinkOsc.start();
             clinkOsc.stop(ctx.currentTime + 0.25);
           }
@@ -1838,7 +1861,7 @@ export default function App() {
         >
           <div className="space-y-2">
             <div className="inline-flex p-4 glass rounded-3xl mb-4 text-primary-container">
-              <Sparkles className="w-10 h-10 drop-shadow-[0_0_15px_rgba(168,230,207,0.5)]" />
+              <Sparkles className="w-10 h-10 drop-shadow-[0_0_12px_rgba(134,207,181,0.25)]" />
             </div>
             <h1 className="text-4xl font-bold tracking-tighter text-primary-container">StudyZen</h1>
             <p className="text-on-surface-variant italic">Tu santuario digital de productividad conectada</p>
@@ -2080,7 +2103,7 @@ export default function App() {
           >
             <Menu className="w-6 h-6" />
           </button>
-          <h1 className="text-xl font-bold tracking-tight text-primary-container drop-shadow-[0_0_10px_rgba(168,230,207,0.5)]">
+          <h1 className="text-xl font-bold tracking-tight text-primary-container drop-shadow-[0_0_8px_rgba(134,207,181,0.25)]">
             StudyZen
           </h1>
         </div>
@@ -2128,7 +2151,7 @@ export default function App() {
                   <motion.circle 
                     cx="160" cy="160" r="145" 
                     fill="transparent" 
-                    stroke={isBreak ? "#88ceff" : "#a8e6cf"} 
+                    stroke={isBreak ? "#88ceff" : "#86cfb5"} 
                     strokeWidth="8" 
                     strokeDasharray={911}
                     strokeDashoffset={911 * (1 - progress)}
@@ -2727,7 +2750,7 @@ export default function App() {
                         {[
                           { name: 'Lluvia', icon: CloudRain, color: '#88ceff', desc: 'Gotas rítmicas para calmar la mente.' },
                           { name: 'Café', icon: Coffee, color: '#c69c6d', desc: 'Escritura y ambiente de cafetería urbana.' },
-                          { name: 'Bosque', icon: Sparkles, color: '#a8e6cf', desc: 'Viento suave y fauna minimalista.' },
+                          { name: 'Bosque', icon: Sparkles, color: '#86cfb5', desc: 'Viento suave y fauna minimalista.' },
                           { name: 'Ruido Blanco', icon: RefreshCw, color: '#ffffff', desc: 'Frecuencia constante para bloqueo total.' }
                         ].map((sound) => (
                           <div 
@@ -2929,12 +2952,12 @@ export default function App() {
               }}
               className={`flex flex-col items-center gap-1 transition-all duration-300 relative px-4 cursor-pointer ${activeTab === tab.id ? 'text-primary-container scale-110' : 'text-on-surface-variant opacity-40 hover:opacity-100'}`}
             >
-              <tab.icon className={`w-6 h-6 ${activeTab === tab.id ? 'drop-shadow-[0_0_8px_rgba(168,230,207,0.5)]' : ''}`} />
+              <tab.icon className={`w-6 h-6 ${activeTab === tab.id ? 'drop-shadow-[0_0_6px_rgba(134,207,181,0.25)]' : ''}`} />
               <span className="text-[10px] font-bold uppercase tracking-widest">{tab.label}</span>
               {activeTab === tab.id && (
                 <motion.div 
                   layoutId="activeTabIndicator"
-                  className="absolute -bottom-2 w-1 h-1 bg-primary-container rounded-full shadow-[0_0_10px_#a8e6cf]"
+                  className="absolute -bottom-2 w-1 h-1 bg-primary-container rounded-full shadow-[0_0_6px_#86cfb5]"
                 />
               )}
             </button>
@@ -2950,7 +2973,7 @@ export default function App() {
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             className="fixed bottom-24 left-6 right-6 md:left-auto md:right-6 md:max-w-sm z-50 p-4 rounded-2xl glass border border-white/20 shadow-2xl flex items-center gap-3"
           >
-            <div className={`w-2 h-2 rounded-full shrink-0 ${toast.type === 'success' ? 'bg-primary-container shadow-[0_0_8px_#a8e6cf]' : toast.type === 'error' ? 'bg-red-500 shadow-[0_0_8px_#ef4444]' : 'bg-blue-400 shadow-[0_0_8px_#60a5fa]'}`} />
+            <div className={`w-2 h-2 rounded-full shrink-0 ${toast.type === 'success' ? 'bg-primary-container shadow-[0_0_6px_#86cfb5]' : toast.type === 'error' ? 'bg-red-500 shadow-[0_0_8px_#ef4444]' : 'bg-blue-400 shadow-[0_0_8px_#60a5fa]'}`} />
             <p className="text-sm font-bold tracking-tight text-white">{toast.message}</p>
           </motion.div>
         )}
