@@ -176,7 +176,8 @@ export default function App() {
   // Sonidos Personalizados del Usuario
   const [customSounds, setCustomSounds] = useState<CustomSound[]>(() => {
     try {
-      const saved = localStorage.getItem('studyzen_custom_sounds');
+      const lastUserId = localStorage.getItem('studyzen_last_user_id');
+      const saved = lastUserId ? localStorage.getItem(`studyzen_custom_sounds_${lastUserId}`) : null;
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -190,7 +191,8 @@ export default function App() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [user, setUser] = useState<UserProfile>(() => {
     try {
-      const saved = localStorage.getItem('studyzen_cached_user');
+      const lastUserId = localStorage.getItem('studyzen_last_user_id');
+      const saved = lastUserId ? localStorage.getItem(`studyzen_user_${lastUserId}`) : null;
       return saved ? JSON.parse(saved) : {
         name: 'Estudiante Zen',
         email: '',
@@ -209,7 +211,8 @@ export default function App() {
 
   const [sessionConfig, setSessionConfig] = useState<SessionConfig>(() => {
     try {
-      const saved = localStorage.getItem('studyzen_session_config');
+      const lastUserId = localStorage.getItem('studyzen_last_user_id');
+      const saved = lastUserId ? localStorage.getItem(`studyzen_config_${lastUserId}`) : null;
       return saved ? JSON.parse(saved) : { focusTime: 25, shortBreak: 5, longBreak: 15 };
     } catch {
       return { focusTime: 25, shortBreak: 5, longBreak: 15 };
@@ -217,13 +220,14 @@ export default function App() {
   });
 
   const [activeSound, setActiveSound] = useState<string>(() => {
-    return localStorage.getItem('studyzen_active_sound') || 'Lluvia';
+    const lastUserId = localStorage.getItem('studyzen_last_user_id');
+    return (lastUserId ? localStorage.getItem(`studyzen_active_sound_${lastUserId}`) : null) || 'Lluvia';
   });
 
   const [tasks, setTasks] = useState<Task[]>(() => {
     try {
       const lastUserId = localStorage.getItem('studyzen_last_user_id');
-      const saved = lastUserId ? localStorage.getItem(`studyzen_tasks_${lastUserId}`) : localStorage.getItem('studyzen_tasks');
+      const saved = lastUserId ? localStorage.getItem(`studyzen_tasks_${lastUserId}`) : null;
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -233,7 +237,8 @@ export default function App() {
   // Estado del Temporizador
   const [timeLeft, setTimeLeft] = useState(() => {
     try {
-      const saved = localStorage.getItem('studyzen_session_config');
+      const lastUserId = localStorage.getItem('studyzen_last_user_id');
+      const saved = lastUserId ? localStorage.getItem(`studyzen_config_${lastUserId}`) : null;
       const config = saved ? JSON.parse(saved) : { focusTime: 25 };
       return (config.focusTime || 25) * 60;
     } catch {
@@ -243,35 +248,42 @@ export default function App() {
   const [isActive, setIsActive] = useState(false);
   const [isBreak, setIsBreak] = useState(false);
   const [sessionsCompleted, setSessionsCompleted] = useState<number>(() => {
-    const saved = localStorage.getItem('studyzen_sessions_completed');
+    const lastUserId = localStorage.getItem('studyzen_last_user_id');
+    const saved = lastUserId ? localStorage.getItem(`studyzen_sessionsCompleted_${lastUserId}`) : null;
     return saved ? parseInt(saved, 10) : 0;
   });
 
   // Estadísticas del usuario persistidas en firestore
   const [currentStreak, setCurrentStreak] = useState<number>(() => {
-    const saved = localStorage.getItem('studyzen_current_streak');
+    const lastUserId = localStorage.getItem('studyzen_last_user_id');
+    const saved = lastUserId ? localStorage.getItem(`studyzen_currentStreak_${lastUserId}`) : null;
     return saved ? parseInt(saved, 10) : 0;
   });
   const [bestStreak, setBestStreak] = useState<number>(() => {
-    const saved = localStorage.getItem('studyzen_best_streak');
+    const lastUserId = localStorage.getItem('studyzen_last_user_id');
+    const saved = lastUserId ? localStorage.getItem(`studyzen_bestStreak_${lastUserId}`) : null;
     return saved ? parseInt(saved, 10) : 0;
   });
   const [weeklyMinutes, setWeeklyMinutes] = useState<number[]>(() => {
     try {
-      const saved = localStorage.getItem('studyzen_weekly_minutes');
+      const lastUserId = localStorage.getItem('studyzen_last_user_id');
+      const saved = lastUserId ? localStorage.getItem(`studyzen_weeklyMinutes_${lastUserId}`) : null;
       return saved ? JSON.parse(saved) : [0, 0, 0, 0, 0, 0, 0];
     } catch {
       return [0, 0, 0, 0, 0, 0, 0];
     }
   });
   const [lastActiveDate, setLastActiveDate] = useState<string>(() => {
-    return localStorage.getItem('studyzen_last_active_date') || '';
+    const lastUserId = localStorage.getItem('studyzen_last_user_id');
+    return (lastUserId ? localStorage.getItem(`studyzen_lastActiveDate_${lastUserId}`) : null) || '';
   });
   const [weekCommencedDate, setWeekCommencedDate] = useState<string>(() => {
-    return localStorage.getItem('studyzen_week_commenced_date') || '';
+    const lastUserId = localStorage.getItem('studyzen_last_user_id');
+    return (lastUserId ? localStorage.getItem(`studyzen_weekCommencedDate_${lastUserId}`) : null) || '';
   });
   const [totalFocusMinutes, setTotalFocusMinutes] = useState<number>(() => {
-    const saved = localStorage.getItem('studyzen_total_focus_minutes');
+    const lastUserId = localStorage.getItem('studyzen_last_user_id');
+    const saved = lastUserId ? localStorage.getItem(`studyzen_total_focus_minutes_${lastUserId}`) : null;
     return saved ? parseInt(saved, 10) : 0;
   });
 
@@ -287,6 +299,10 @@ export default function App() {
   const [nameInput, setNameInput] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
+
+  // Estados para foto de perfil al momento de registrarse
+  const [registerAvatar, setRegisterAvatar] = useState<string>('https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop');
+  const registerFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Sistema de notificaciones (Toast) personalizado para evitar window.alert bloqueados en el iframe de vista previa
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -353,6 +369,29 @@ export default function App() {
         resolve(base64Str);
       };
     });
+  };
+
+  const handleRegisterFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 20 * 1024 * 1024) {
+        showToast("La imagen es demasiado grande. Selecciona una foto menor de 20MB.", "error");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const rawBase64 = reader.result as string;
+        try {
+          const compressedBase64 = await compressImage(rawBase64, 200, 200);
+          setRegisterAvatar(compressedBase64);
+          showToast('Foto de registro cargada con éxito', 'success');
+        } catch (err: any) {
+          console.error("Error al procesar la foto de perfil del registro:", err);
+          showToast(`No se pudo cargar la imagen: ${err.message || err}`, 'error');
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   // Sincronizar estados locales de edición de perfil cuando la pantalla cambie o el perfil cambie
@@ -586,45 +625,94 @@ export default function App() {
     return () => unsubscribe();
   }, [currentUserId]);
 
-  // Hidratar estados desde localStorage cuando currentUserId cambie para carga instantánea
+  // Hidratar estados desde localStorage cuando currentUserId cambie para carga instantánea y separar cuentas completamente
   useEffect(() => {
-    if (!currentUserId) return;
+    if (!currentUserId) {
+      // Limpiar estados cuando no hay usuario autenticado
+      setUser({
+        name: 'Estudiante Zen',
+        email: '',
+        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
+        joinDate: 'Estudiante Zen'
+      });
+      setSessionConfig({ focusTime: 25, shortBreak: 5, longBreak: 15 });
+      setSessionsCompleted(0);
+      setCurrentStreak(0);
+      setBestStreak(0);
+      setWeeklyMinutes([0, 0, 0, 0, 0, 0, 0]);
+      setLastActiveDate('');
+      setWeekCommencedDate('');
+      setTotalFocusMinutes(0);
+      setCustomSounds([]);
+      setTasks([]);
+      setActiveSound('Lluvia');
+      setTimeLeft(25 * 60);
+      return;
+    }
+
     try {
+      // Cargar o restablecer perfil de usuario
       const u = localStorage.getItem(`studyzen_user_${currentUserId}`);
-      if (u) setUser(JSON.parse(u));
+      if (u) {
+        setUser(JSON.parse(u));
+      } else {
+        setUser({
+          name: 'Cargando...',
+          email: '',
+          avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
+          joinDate: 'Uniendo...'
+        });
+      }
       
+      // Configuración de pomodoro
       const c = localStorage.getItem(`studyzen_config_${currentUserId}`);
-      if (c) setSessionConfig(JSON.parse(c));
+      if (c) {
+        const config = JSON.parse(c);
+        setSessionConfig(config);
+        setTimeLeft((config.focusTime || 25) * 60);
+      } else {
+        const defaultConfig = { focusTime: 25, shortBreak: 5, longBreak: 15 };
+        setSessionConfig(defaultConfig);
+        setTimeLeft(25 * 60);
+      }
       
+      // Sesiones completadas
       const s = localStorage.getItem(`studyzen_sessionsCompleted_${currentUserId}`);
-      if (s) setSessionsCompleted(Number(s));
+      setSessionsCompleted(s ? Number(s) : 0);
       
+      // Rachas
       const cs = localStorage.getItem(`studyzen_currentStreak_${currentUserId}`);
-      if (cs) setCurrentStreak(Number(cs));
+      setCurrentStreak(cs ? Number(cs) : 0);
       
       const bs = localStorage.getItem(`studyzen_bestStreak_${currentUserId}`);
-      if (bs) setBestStreak(Number(bs));
+      setBestStreak(bs ? Number(bs) : 0);
       
+      // Gráfica de minutos semanales
       const wm = localStorage.getItem(`studyzen_weeklyMinutes_${currentUserId}`);
-      if (wm) setWeeklyMinutes(JSON.parse(wm));
+      setWeeklyMinutes(wm ? JSON.parse(wm) : [0, 0, 0, 0, 0, 0, 0]);
       
+      // Fechas de actividad
       const la = localStorage.getItem(`studyzen_lastActiveDate_${currentUserId}`);
-      if (la) setLastActiveDate(la);
+      setLastActiveDate(la || '');
       
       const wc = localStorage.getItem(`studyzen_weekCommencedDate_${currentUserId}`);
-      if (wc) setWeekCommencedDate(wc);
+      setWeekCommencedDate(wc || '');
 
+      // Minutos de enfoque totales
       const tf = localStorage.getItem(`studyzen_total_focus_minutes_${currentUserId}`);
-      if (tf) setTotalFocusMinutes(Number(tf));
+      setTotalFocusMinutes(tf ? Number(tf) : 0);
 
+      // Sonidos personalizados
       const snd = localStorage.getItem(`studyzen_custom_sounds_${currentUserId}`);
-      if (snd) setCustomSounds(JSON.parse(snd));
+      setCustomSounds(snd ? JSON.parse(snd) : []);
 
+      // Tareas
       const tsk = localStorage.getItem(`studyzen_tasks_${currentUserId}`);
-      if (tsk) setTasks(JSON.parse(tsk));
+      setTasks(tsk ? JSON.parse(tsk) : []);
 
+      // Sonido activo
       const as = localStorage.getItem(`studyzen_active_sound_${currentUserId}`);
-      if (as) setActiveSound(as);
+      setActiveSound(as || 'Lluvia');
     } catch (e) {
       console.warn("Could not hydrate from localStorage:", e);
     }
@@ -1475,6 +1563,9 @@ export default function App() {
   const selectSound = async (soundName: string) => {
     setActiveSound(soundName);
     setIsAmbientSoundPlaying(true);
+    if (currentUserId) {
+      localStorage.setItem(`studyzen_active_sound_${currentUserId}`, soundName);
+    }
     localStorage.setItem('studyzen_active_sound', soundName);
     const activeUid = currentUserId || auth.currentUser?.uid;
     if (activeUid) {
@@ -1520,6 +1611,9 @@ export default function App() {
 
     const updatedList = [...customSounds, newSoundItem];
     setCustomSounds(updatedList);
+    if (activeUid) {
+      localStorage.setItem(`studyzen_custom_sounds_${activeUid}`, JSON.stringify(updatedList));
+    }
     localStorage.setItem('studyzen_custom_sounds', JSON.stringify(updatedList));
     
     try {
@@ -1559,7 +1653,7 @@ export default function App() {
       await setDoc(userDocRef, {
         name: nameInput.trim(),
         email: firebaseUser.email || '',
-        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop',
+        avatar: registerAvatar,
         joinDate: new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long' }),
         focusTime: 25,
         shortBreak: 5,
@@ -1575,6 +1669,7 @@ export default function App() {
       });
       
       showToast('¡Cuenta creada con éxito!', 'success');
+      setRegisterAvatar('https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&h=200&auto=format&fit=crop');
     } catch (error: any) {
       console.error(error);
       if (error.code === 'auth/operation-not-allowed' || error.code === 'auth/configuration-not-found') {
@@ -1686,6 +1781,28 @@ export default function App() {
             <h2 className="text-xl font-bold">{authMode === 'login' ? 'Bienvenido de nuevo' : 'Crea tu cuenta'}</h2>
             
             <form onSubmit={authMode === 'login' ? handleEmailSignIn : handleEmailSignUp} className="space-y-4">
+              {authMode === 'register' && (
+                <div className="flex flex-col items-center space-y-2 pb-2">
+                  <div className="relative group cursor-pointer" onClick={() => registerFileInputRef.current?.click()}>
+                    <img 
+                      src={registerAvatar} 
+                      className="w-20 h-20 rounded-full border border-primary-container/30 object-cover" 
+                      alt="Avatar de registro"
+                    />
+                    <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Camera className="w-5 h-5 text-white" />
+                    </div>
+                  </div>
+                  <span className="text-xs text-on-surface-variant">Sube una foto de perfil (opcional)</span>
+                  <input 
+                    type="file" 
+                    ref={registerFileInputRef}
+                    onChange={handleRegisterFileChange}
+                    accept="image/*"
+                    className="hidden"
+                  />
+                </div>
+              )}
               {authMode === 'register' && (
                 <div className="relative">
                   <User className="absolute left-3 top-3 w-5 h-5 text-on-surface-variant opacity-50" />
@@ -1901,9 +2018,6 @@ export default function App() {
           </h1>
         </div>
         <div className="flex items-center gap-3">
-          <button className="p-2 text-on-surface-variant hover:bg-white/10 rounded-lg transition-colors">
-            <Bell className="w-5 h-5" />
-          </button>
           <div 
             onClick={() => {
               setActiveTab('profile');
@@ -2047,29 +2161,45 @@ export default function App() {
               </div>
 
               {/* Resumen Card */}
-              <div className="w-full mt-8 p-6 glass rounded-3xl flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-primary-container/20 flex items-center justify-center">
-                    <Flame className="w-6 h-6 text-primary-container fill-current" />
+              <div className="w-full mt-8 p-6 glass rounded-3xl flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-primary-container/20 flex items-center justify-center">
+                      <Flame className="w-6 h-6 text-primary-container fill-current" />
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-on-surface-variant font-bold">Sesiones completadas</p>
+                      <p className="text-2xl font-bold">
+                        {activeTaskId && tasks.find(t => t.id === activeTaskId)
+                          ? `${tasks.find(t => t.id === activeTaskId)?.progress || 0}/${tasks.find(t => t.id === activeTaskId)?.sessions}`
+                          : `${sessionsCompleted}/8`
+                        }
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-widest text-on-surface-variant font-bold">Sesiones hoy</p>
-                    <p className="text-2xl font-bold">
+                  <div className="text-right">
+                    <p className="text-xs uppercase tracking-widest text-on-surface-variant font-bold">Objetivo</p>
+                    <p className="text-sm font-bold text-primary-container truncate max-w-[150px]">
                       {activeTaskId && tasks.find(t => t.id === activeTaskId)
-                        ? `${tasks.find(t => t.id === activeTaskId)?.progress || 0}/${tasks.find(t => t.id === activeTaskId)?.sessions}`
-                        : `${sessionsCompleted}/8`
+                        ? tasks.find(t => t.id === activeTaskId)?.title
+                        : '8 diarias'
                       }
                     </p>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-xs uppercase tracking-widest text-on-surface-variant font-bold">Objetivo</p>
-                  <p className="text-sm font-bold text-primary-container truncate max-w-[150px]">
-                    {activeTaskId && tasks.find(t => t.id === activeTaskId)
-                      ? tasks.find(t => t.id === activeTaskId)?.title
-                      : '8 diarias'
-                    }
-                  </p>
+
+                {/* Progress bar */}
+                <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden mt-1">
+                  <div 
+                    className="bg-primary-container h-full transition-all duration-500 shadow-[0_0_10px_rgba(168,230,207,0.5)]"
+                    style={{ 
+                      width: `${
+                        activeTaskId && tasks.find(t => t.id === activeTaskId)
+                          ? Math.min(100, (((tasks.find(t => t.id === activeTaskId)?.progress || 0) / (tasks.find(t => t.id === activeTaskId)?.sessions || 1)) * 100))
+                          : Math.min(100, ((sessionsCompleted / 8) * 100))
+                      }%` 
+                    }}
+                  />
                 </div>
               </div>
             </motion.div>
@@ -2490,6 +2620,7 @@ export default function App() {
                                     const updatedList = customSounds.filter(s => s.id !== sound.id);
                                     setCustomSounds(updatedList);
                                     if (currentUserId) {
+                                      localStorage.setItem(`studyzen_custom_sounds_${currentUserId}`, JSON.stringify(updatedList));
                                       try {
                                         await updateDoc(doc(db, 'users', currentUserId), {
                                           customSounds: updatedList
