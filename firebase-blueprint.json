@@ -13,7 +13,8 @@
         "shortBreak": { "type": "integer" },
         "longBreak": { "type": "integer" },
         "activeSound": { "type": "string" },
-        "sessionsCompleted": { "type": "integer" }
+        "sessionsCompleted": { "type": "integer" },
+        "activeTaskId": { "type": "string" }
       },
       "required": ["name", "email"]
     },
@@ -27,7 +28,8 @@
         "date": { "type": "string" },
         "difficulty": { "type": "string", "enum": ["Baja", "Media", "Alta"] },
         "sessions": { "type": "integer" },
-        "completed": { "type": "boolean" }
+        "completed": { "type": "boolean" },
+        "progress": { "type": "integer" }
       },
       "required": ["userId", "title", "completed"]
     }
