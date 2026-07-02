@@ -1471,7 +1471,13 @@ export default function App() {
         try {
           // Comprimir y recortar a un tamaño óptimo para avatares (200x200 jpeg)
           const compressedBase64 = await compressImage(rawBase64, 200, 200);
-          setUser(prev => ({ ...prev, avatar: compressedBase64 }));
+          setUser(prev => {
+            const updated = { ...prev, avatar: compressedBase64 };
+            if (currentUserId) {
+              localStorage.setItem(`studyzen_user_${currentUserId}`, JSON.stringify(updated));
+            }
+            return updated;
+          });
           
           if (currentUserId) {
             await updateDoc(doc(db, 'users', currentUserId), {
@@ -2425,18 +2431,32 @@ export default function App() {
                     <div className="flex flex-col items-center py-4">
                       <div className="relative mb-6">
                         <motion.div 
-                          whileHover={{ scale: 1.02 }}
-                          className="w-32 h-32 rounded-full glass p-1 glow-primary relative"
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={handleAvatarClick}
+                          className="w-32 h-32 rounded-full glass p-1 glow-primary relative cursor-pointer group"
+                          title="Haz clic para cambiar tu foto de perfil"
                         >
-                          <div className="w-full h-full rounded-full overflow-hidden border-2 border-primary-container/20">
+                          <div className="w-full h-full rounded-full overflow-hidden border-2 border-primary-container/20 relative">
                             <img 
                               src={user.avatar} 
                               alt="Perfil" 
-                              className="w-full h-full object-cover"
+                              className="w-full h-full object-cover group-hover:brightness-50 transition-all duration-300"
                               referrerPolicy="no-referrer"
                             />
+                            <div className="absolute inset-0 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-black/40">
+                              <Camera className="w-6 h-6 text-white mb-1" />
+                              <span className="text-[10px] text-white font-medium">Cambiar</span>
+                            </div>
                           </div>
                         </motion.div>
+                        <input 
+                          type="file" 
+                          ref={fileInputRef}
+                          onChange={handleFileChange}
+                          accept="image/*"
+                          className="hidden"
+                        />
                       </div>
                       
                       <div className="text-center mt-2">
