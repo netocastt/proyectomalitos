@@ -322,13 +322,7 @@ export default function App() {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const isCompletingRef = useRef(false);
 
-  // Estados para edición directa de nombre
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [tempNameText, setTempNameText] = useState('');
-
-  // Estados controlados para formularios de edición de perfil y creación de tareas
-  const [editProfileName, setEditProfileName] = useState('');
-  const [editProfileEmail, setEditProfileEmail] = useState('');
+  // Estados controlados para creación de tareas
   const [taskTitleInput, setTaskTitleInput] = useState('');
   const [taskDateInput, setTaskDateInput] = useState('');
   const [taskDifficultyInput, setTaskDifficultyInput] = useState<Task['difficulty']>('Media');
@@ -394,13 +388,7 @@ export default function App() {
     }
   };
 
-  // Sincronizar estados locales de edición de perfil cuando la pantalla cambie o el perfil cambie
-  useEffect(() => {
-    if (activeSubScreen === 'profile-settings') {
-      setEditProfileName(user.name);
-      setEditProfileEmail(user.email);
-    }
-  }, [activeSubScreen, user.name, user.email]);
+
 
   // Escribir un perfil predeterminado o leerlo al iniciar sesión
   useEffect(() => {
@@ -499,6 +487,14 @@ export default function App() {
         if (data.activeSound) {
           setActiveSound(data.activeSound);
           localStorage.setItem(`studyzen_active_sound_${currentUserId}`, data.activeSound);
+        }
+        if (data.hasOwnProperty('activeTaskId')) {
+          setActiveTaskId(data.activeTaskId || null);
+          if (data.activeTaskId) {
+            localStorage.setItem(`studyzen_active_task_id_${currentUserId}`, data.activeTaskId);
+          } else {
+            localStorage.removeItem(`studyzen_active_task_id_${currentUserId}`);
+          }
         }
         if (typeof data.sessionsCompleted === 'number') {
           setSessionsCompleted(data.sessionsCompleted);
@@ -709,6 +705,9 @@ export default function App() {
       // Tareas
       const tsk = localStorage.getItem(`studyzen_tasks_${currentUserId}`);
       setTasks(tsk ? JSON.parse(tsk) : []);
+
+      const atid = localStorage.getItem(`studyzen_active_task_id_${currentUserId}`);
+      setActiveTaskId(atid || null);
 
       // Sonido activo
       const as = localStorage.getItem(`studyzen_active_sound_${currentUserId}`);
@@ -1219,6 +1218,10 @@ export default function App() {
             if (isCompleted) {
               showToast(`¡Excelente! Completaste todas las sesiones de: ${targetTask.title}`, 'success');
               setActiveTaskId(null);
+              if (currentUserId) {
+                localStorage.removeItem(`studyzen_active_task_id_${currentUserId}`);
+                await updateDoc(doc(db, 'users', currentUserId), { activeTaskId: null });
+              }
             } else {
               showToast(`¡Sesión de ${targetTask.title} registrada! (${nextTaskProgress}/${targetTask.sessions})`, 'success');
             }
@@ -1411,6 +1414,12 @@ export default function App() {
 
     if (activeTaskId === id) {
       setActiveTaskId(null);
+      localStorage.removeItem(`studyzen_active_task_id_${currentUserId}`);
+      try {
+        await updateDoc(doc(db, 'users', currentUserId), { activeTaskId: null });
+      } catch (err) {
+        console.error("Error clearing activeTaskId on delete:", err);
+      }
     }
 
     try {
@@ -1505,49 +1514,7 @@ export default function App() {
     }
   };
 
-  // Guardar Cambios del Perfil
-  const saveProfileChanges = async (newName: string) => {
-    const activeUid = currentUserId || auth.currentUser?.uid;
-    if (!activeUid) {
-      showToast("No se detectó un usuario autenticado legítimo.", "error");
-      return;
-    }
-    const trimmedName = newName.trim();
-    try {
-      await updateDoc(doc(db, 'users', activeUid), {
-        name: trimmedName
-      });
-      if (auth.currentUser) {
-        await updateProfile(auth.currentUser, { displayName: trimmedName });
-      }
-      setUser(prev => ({ ...prev, name: trimmedName }));
-      showToast('¡Perfil actualizado correctamente!', 'success');
-      setActiveSubScreen('none');
-    } catch (err: any) {
-      console.error("Error al guardar perfil:", err);
-      showToast(`No se pudo actualizar el perfil: ${err.message || err}`, 'error');
-    }
-  };
 
-  // Guardar nombre directamente (sin alertas redundantes o retrasos)
-  const saveProfileNameDirectly = async (newName: string) => {
-    const activeUid = currentUserId || auth.currentUser?.uid;
-    if (!activeUid || !newName.trim()) return;
-    const trimmedName = newName.trim();
-    try {
-      setUser(prev => ({ ...prev, name: trimmedName }));
-      await updateDoc(doc(db, 'users', activeUid), {
-        name: trimmedName
-      });
-      if (auth.currentUser) {
-        await updateProfile(auth.currentUser, { displayName: trimmedName });
-      }
-      showToast('Nombre actualizado correctamente', 'success');
-    } catch (err: any) {
-      console.error("Error al guardar nombre directamente:", err);
-      showToast(`No se pudo actualizar el nombre directamente: ${err.message || err}`, 'error');
-    }
-  };
 
   // Actualizar configuración de sesión en base de datos
   const updateSessionConfig = async (key: keyof SessionConfig, value: number) => {
@@ -2100,7 +2067,17 @@ export default function App() {
                   </span>
                   {activeTaskId && (
                     <button 
-                      onClick={() => setActiveTaskId(null)} 
+                      onClick={async () => {
+                        setActiveTaskId(null);
+                        if (currentUserId) {
+                          localStorage.removeItem(`studyzen_active_task_id_${currentUserId}`);
+                          try {
+                            await updateDoc(doc(db, 'users', currentUserId), { activeTaskId: null });
+                          } catch (err) {
+                            console.error("Error clearing activeTaskId:", err);
+                          }
+                        }
+                      }} 
                       className="text-[10px] uppercase tracking-widest text-red-400 hover:text-red-300 font-bold transition-colors cursor-pointer"
                     >
                       Quitar
@@ -2109,9 +2086,21 @@ export default function App() {
                 </div>
                 <select
                   value={activeTaskId || ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setActiveTaskId(val ? val : null);
+                  onChange={async (e) => {
+                    const val = e.target.value || null;
+                    setActiveTaskId(val);
+                    if (currentUserId) {
+                      if (val) {
+                        localStorage.setItem(`studyzen_active_task_id_${currentUserId}`, val);
+                      } else {
+                        localStorage.removeItem(`studyzen_active_task_id_${currentUserId}`);
+                      }
+                      try {
+                        await updateDoc(doc(db, 'users', currentUserId), { activeTaskId: val });
+                      } catch (err) {
+                        console.error("Error setting activeTaskId:", err);
+                      }
+                    }
                   }}
                   className="w-full bg-slate-900/60 border border-white/10 rounded-xl p-3 outline-none text-sm text-white focus:ring-1 focus:ring-primary-container cursor-pointer [color-scheme:dark]"
                 >
@@ -2186,46 +2175,71 @@ export default function App() {
               </div>
 
               {/* Resumen Card */}
-              <div className="w-full mt-8 p-6 glass rounded-3xl flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-primary-container/20 flex items-center justify-center">
-                      <Flame className="w-6 h-6 text-primary-container fill-current" />
+              <div className="w-full mt-8 p-6 glass rounded-3xl flex flex-col gap-4">
+                {/* 1. Sesiones Diarias */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-primary-container/10 flex items-center justify-center">
+                        <Flame className="w-5 h-5 text-primary-container fill-current animate-pulse" />
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-on-surface-variant font-bold">Sesiones Diarias</p>
+                        <p className="text-xl font-bold">{sessionsCompleted} / 8</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-xs uppercase tracking-widest text-on-surface-variant font-bold">Sesiones completadas</p>
-                      <p className="text-2xl font-bold">
-                        {activeTaskId && tasks.find(t => t.id === activeTaskId)
-                          ? `${tasks.find(t => t.id === activeTaskId)?.progress || 0}/${tasks.find(t => t.id === activeTaskId)?.sessions}`
-                          : `${sessionsCompleted}/8`
-                        }
-                      </p>
+                    <div className="text-right">
+                      <p className="text-xs uppercase tracking-widest text-on-surface-variant font-bold">Objetivo Diario</p>
+                      <p className="text-xs font-bold text-primary-container">8 sugeridas</p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xs uppercase tracking-widest text-on-surface-variant font-bold">Objetivo</p>
-                    <p className="text-sm font-bold text-primary-container truncate max-w-[150px]">
-                      {activeTaskId && tasks.find(t => t.id === activeTaskId)
-                        ? tasks.find(t => t.id === activeTaskId)?.title
-                        : '8 diarias'
-                      }
-                    </p>
+                  {/* Progress bar Diaria */}
+                  <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden mt-1 relative">
+                    <div 
+                      className="bg-primary-container h-full transition-all duration-500 shadow-[0_0_10px_rgba(168,230,207,0.5)]"
+                      style={{ width: `${Math.min(100, (sessionsCompleted / 8) * 100)}%` }}
+                    />
                   </div>
                 </div>
 
-                {/* Progress bar */}
-                <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden mt-1">
-                  <div 
-                    className="bg-primary-container h-full transition-all duration-500 shadow-[0_0_10px_rgba(168,230,207,0.5)]"
-                    style={{ 
-                      width: `${
-                        activeTaskId && tasks.find(t => t.id === activeTaskId)
-                          ? Math.min(100, (((tasks.find(t => t.id === activeTaskId)?.progress || 0) / (tasks.find(t => t.id === activeTaskId)?.sessions || 1)) * 100))
-                          : Math.min(100, ((sessionsCompleted / 8) * 100))
-                      }%` 
-                    }}
-                  />
-                </div>
+                {/* 2. Sesiones de la Tarea Activa (si está seleccionada) */}
+                {activeTaskId && (() => {
+                  const activeTask = tasks.find(t => t.id === activeTaskId);
+                  if (!activeTask) return null;
+                  const pct = Math.min(100, (((activeTask.progress || 0) / (activeTask.sessions || 1)) * 100));
+                  return (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="space-y-2 pt-3 border-t border-white/5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-secondary/10 flex items-center justify-center">
+                            <CheckCircle2 className="w-5 h-5 text-secondary" />
+                          </div>
+                          <div className="min-w-0 max-w-[150px] sm:max-w-xs">
+                            <p className="text-xs uppercase tracking-widest text-on-surface-variant font-bold truncate">Sesiones de Tarea</p>
+                            <p className="text-xl font-bold truncate text-white">{activeTask.title}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs uppercase tracking-widest text-on-surface-variant font-bold">Progreso</p>
+                          <p className="text-xs font-mono font-bold text-secondary">
+                            {activeTask.progress || 0} / {activeTask.sessions} ses. ({Math.round(pct)}%)
+                          </p>
+                        </div>
+                      </div>
+                      {/* Progress bar de la Tarea */}
+                      <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden mt-1 relative">
+                        <div 
+                          className="bg-secondary h-full transition-all duration-500 shadow-[0_0_10px_rgba(136,206,255,0.5)]"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </motion.div>
+                  );
+                })()}
               </div>
             </motion.div>
           )}
@@ -2355,10 +2369,15 @@ export default function App() {
                             </div>
                           ) : (
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 setActiveTaskId(task.id);
                                 if (currentUserId) {
                                   localStorage.setItem(`studyzen_active_task_id_${currentUserId}`, task.id);
+                                  try {
+                                    await updateDoc(doc(db, 'users', currentUserId), { activeTaskId: task.id });
+                                  } catch (err) {
+                                    console.error("Error setting activeTaskId on planner selection:", err);
+                                  }
                                 }
                                 setActiveTab('focus');
                                 showToast(`Enfocando en: ${task.title}`, 'info');
@@ -2504,54 +2523,7 @@ export default function App() {
                       </div>
                       
                       <div className="text-center mt-2 flex flex-col items-center">
-                        {isEditingName ? (
-                          <div className="flex items-center gap-2 max-w-xs justify-center">
-                            <input
-                              type="text"
-                              value={tempNameText}
-                              onChange={(e) => setTempNameText(e.target.value)}
-                              className="bg-white/5 border border-white/15 rounded-xl px-3 py-1.5 outline-none focus:ring-1 focus:ring-primary-container text-white text-lg font-bold text-center w-48 font-sans"
-                              autoFocus
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  saveProfileNameDirectly(tempNameText);
-                                  setIsEditingName(false);
-                                } else if (e.key === 'Escape') {
-                                  setIsEditingName(false);
-                                }
-                              }}
-                            />
-                            <button
-                              onClick={() => {
-                                saveProfileNameDirectly(tempNameText);
-                                setIsEditingName(false);
-                              }}
-                              className="p-2 bg-primary-container text-slate-900 rounded-xl hover:scale-105 active:scale-95 transition-transform cursor-pointer"
-                            >
-                              <Check className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => setIsEditingName(false)}
-                              className="p-2 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 active:scale-95 transition-all text-on-surface-variant cursor-pointer"
-                            >
-                              <ChevronRight className="w-4 h-4 rotate-180" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2 justify-center group/name">
-                            <h2 className="text-2xl font-bold text-white">{user.name}</h2>
-                            <button
-                              onClick={() => {
-                                setTempNameText(user.name);
-                                setIsEditingName(true);
-                              }}
-                              className="p-1.5 opacity-40 group-hover/name:opacity-100 hover:bg-white/5 rounded-lg transition-all text-on-surface-variant cursor-pointer"
-                              title="Editar nombre"
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        )}
+                        <h2 className="text-2xl font-bold text-white">{user.name}</h2>
                         <p className="text-sm text-on-surface-variant font-medium mt-1">{user.email}</p>
                       </div>
                       
@@ -2570,12 +2542,11 @@ export default function App() {
                         </div>
                       </div>
                     </div>
-
+ 
                     <div className="space-y-3">
                       <h3 className="font-bold px-1">Mi Cuenta</h3>
                       <div className="space-y-3">
                         {[
-                          { label: 'Editar Perfil', sub: 'Cambia tu foto y nombre de usuario', icon: User, screen: 'profile-settings' },
                           { label: 'Tiempo de Enfoque', sub: 'Modifica tu duración de enfoque', icon: Timer, screen: 'session-settings' },
                           { label: 'Biblioteca de Sonidos', sub: 'Personaliza tu atmósfera de Zen', icon: Sparkles, screen: 'sound-library' }
                         ].map((item, i) => (
@@ -2606,76 +2577,6 @@ export default function App() {
                       <LogOut className="w-5 h-5" />
                       CERRAR SESIÓN
                     </button>
-                  </motion.div>
-                )}
-
-                {activeSubScreen === 'profile-settings' && (
-                  <motion.div
-                    key="profile-settings"
-                    initial={{ opacity: 0, x: 10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -10 }}
-                    className="space-y-6"
-                  >
-                    <button onClick={() => setActiveSubScreen('none')} className="flex items-center gap-2 text-on-surface-variant hover:text-primary-container transition-colors cursor-pointer">
-                      <ChevronRight className="w-5 h-5 rotate-180" />
-                      <span>Volver al perfil</span>
-                    </button>
-                    <h3 className="text-2xl font-bold">Editar Perfil</h3>
-                    
-                    <div className="glass p-6 rounded-3xl space-y-6">
-                      {/* Foto de Perfil en Configuración */}
-                      <div className="flex flex-col items-center gap-3">
-                        <span className="text-xs font-bold uppercase tracking-widest opacity-70">Foto de Perfil</span>
-                        <div className="relative">
-                          <div 
-                            onClick={handleAvatarClick}
-                            className="w-24 h-24 rounded-full overflow-hidden border-2 border-primary-container/20 relative cursor-pointer hover:brightness-90 transition-all group animate-none"
-                          >
-                            <img 
-                              src={user.avatar} 
-                              alt="Perfil" 
-                              className="w-full h-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                              <Camera className="w-5 h-5 text-white" />
-                            </div>
-                          </div>
-                        </div>
-                        <button 
-                          onClick={handleAvatarClick}
-                          className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-xs font-bold text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
-                        >
-                          Elegir Nueva Foto
-                        </button>
-                      </div>
-
-                      {/* Nombre en Configuración */}
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-widest opacity-70 block px-1">Nombre de Usuario</label>
-                        <input 
-                          type="text" 
-                          value={editProfileName}
-                          onChange={(e) => setEditProfileName(e.target.value)}
-                          placeholder="Tu nombre"
-                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:ring-1 focus:ring-primary-container text-white transition-all text-sm"
-                        />
-                      </div>
-
-                      <button 
-                        onClick={() => {
-                          if (editProfileName.trim()) {
-                            saveProfileChanges(editProfileName);
-                          } else {
-                            showToast("El nombre no puede estar vacío.", "error");
-                          }
-                        }}
-                        className="w-full py-3 bg-primary-container text-slate-900 font-bold rounded-xl hover:scale-[1.02] active:scale-95 transition-all cursor-pointer text-sm"
-                      >
-                        GUARDAR CAMBIOS
-                      </button>
-                    </div>
                   </motion.div>
                 )}
 
